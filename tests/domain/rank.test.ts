@@ -59,6 +59,14 @@ test("low-confidence events only fill up to min 5, at the bottom", () => {
   expect(ranked.slice(3).every((e) => e.confidence === 0.3)).toBe(true);
 });
 
+test("speaking boost is dropped once the pre-approval deadline has passed", () => {
+  const sub = { subScores: { audienceFit: 3, wealth: 3 } };
+  const late = makeEvent({ ...sub, speaking: "asked", needsPreapproval: true, startsAt: "2026-11-23T18:00:00-08:00" });
+  const none = makeEvent({ ...sub, speaking: null, startsAt: "2026-11-23T18:00:00-08:00" });
+  const [a, b] = [rankEvents([late], p, NOW)[0], rankEvents([none], p, NOW)[0]];
+  expect(a.score).toBe(b.score);
+});
+
 test("unscored events (subScores null) are not ranked", () => {
   expect(rankEvents([makeEvent({ subScores: null })], p, NOW)).toHaveLength(0);
 });

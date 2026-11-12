@@ -1,4 +1,5 @@
 import type { EventItem, Profile } from "@/lib/types";
+import { complianceDeadline } from "./compliance";
 import { DAY_MS } from "./dates";
 
 export const WINDOW_DAYS = 56;
@@ -44,7 +45,12 @@ export function rankEvents(
   const { max = 10, min = 5, minConfidence = 0.5 } = opts;
   const scored = events
     .filter((e) => e.subScores !== null && isEligible(e, p, now))
-    .map((e) => ({ ...e, score: computeScore(e, p) }))
+    .map((e) => {
+      // Too late to get approval to speak: score it as an attend-only event.
+      const late =
+        e.needsPreapproval && complianceDeadline(e.startsAt, p.complianceRule.leadDays, now, p.timezone).passed;
+      return { ...e, score: computeScore(late ? { ...e, speaking: null } : e, p) };
+    })
     .sort((a, b) => b.score - a.score);
   const confident = scored.filter((e) => e.confidence >= minConfidence).slice(0, max);
   if (confident.length >= min) return confident;

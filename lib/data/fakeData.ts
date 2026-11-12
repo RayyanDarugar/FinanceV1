@@ -30,7 +30,7 @@ export function createFakeData(storage: Storage, now: () => Date): AppData {
     }
     return { ...makeFixtures(now()), proposals: {} };
   };
-  let state = load();
+  const state = load();
   const save = () => {
     try {
       storage.setItem(KEY, JSON.stringify(state));
