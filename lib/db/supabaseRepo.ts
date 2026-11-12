@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Organization, Profile } from "@/lib/types";
+import { newUsage } from "@/lib/engine/usage";
 import { nameKey, USER_EVENT_FIELDS, USER_ORG_FIELDS, type Repo, type StoredEvent } from "./repo";
+import type { Run, RunPage } from "./runs";
 import { supabase } from "./supabase";
 
 function check<T>(res: { data: T; error: { message: string } | null }, what: string): T {
@@ -8,7 +10,18 @@ function check<T>(res: { data: T; error: { message: string } | null }, what: str
   return res.data;
 }
 
-type EventRow = { id: string; dedupe_key: string; data: StoredEvent; raw: Record<string, unknown> };
+type RunRow = {
+  id: string; profile_id: string; kind: Run["kind"]; week_key: string; stage: Run["stage"]; cursor: Run["cursor"];
+  locked_until: string | null; emailed_at: string | null; usage: Run["usage"]; error: string | null;
+};
+const fromRunRow = (r: RunRow): Run => ({
+  id: r.id, profileId: r.profile_id, kind: r.kind, weekKey: r.week_key, stage: r.stage, cursor: r.cursor,
+  lockedUntil: r.locked_until, emailedAt: r.emailed_at, usage: { ...newUsage(), ...r.usage }, error: r.error,
+});
+type PageRow = { run_id: string; url: string; source_kind: RunPage["sourceKind"]; status: RunPage["status"] };
+const fromPageRow = (r: PageRow): RunPage => ({ runId: r.run_id, url: r.url, sourceKind: r.source_kind, status: r.status });
+
+type EventRow ={ id: string; dedupe_key: string; data: StoredEvent; raw: Record<string, unknown> };
 const fromEventRow = (r: EventRow): StoredEvent => ({ ...r.data, id: r.id, dedupeKey: r.dedupe_key, raw: r.raw ?? {} });
 
 /** Live Repo on Supabase Postgres (schema: supabase/migrations). */
@@ -155,6 +168,83 @@ export function createSupabaseRepo(db: SupabaseClient = supabase()): Repo {
         "take proposal",
       ) as { proposal: never; patches: never }[];
       return rows[0] ? { proposal: rows[0].proposal, patches: rows[0].patches } : null;
+    },
+
+    async getRun(profileId, kind, weekKey) {
+      const r = check(
+        await db.from("runs").select("*").eq("profile_id", profileId).eq("kind", kind).eq("week_key", weekKey).maybeSingle(),
+        "get run",
+      );
+      return r ? fromRunRow(r as RunRow) : null;
+    },
+    async getOrCreateRun(profileId, kind, weekKey, newId, first) {
+      const existing = await this.getRun(profileId, kind, weekKey);
+      if (existing) return existing;
+      // ignoreDuplicates: a concurrent caller may have created it first; re-read either way.
+      check(
+        await db
+          .from("runs")
+          .upsert(
+            { id: newId(), profile_id: profileId, kind, week_key: weekKey, stage: first, usage: newUsage() },
+            { onConflict: "profile_id,kind,week_key", ignoreDuplicates: true },
+          ),
+        "create run",
+      );
+      return (await this.getRun(profileId, kind, weekKey))!;
+    },
+    async lockRun(id, until, now) {
+      const rows = check(
+        await db
+          .from("runs")
+          .update({ locked_until: until.toISOString() })
+          .eq("id", id)
+          .or(`locked_until.is.null,locked_until.lt.${now.toISOString()}`)
+          .select("*"),
+        "lock run",
+      ) as RunRow[];
+      return rows[0] ? fromRunRow(rows[0]) : null;
+    },
+    async saveRun(id, patch) {
+      check(
+        await db
+          .from("runs")
+          .update({ ...patch, locked_until: null, updated_at: new Date().toISOString() })
+          .eq("id", id),
+        "save run",
+      );
+    },
+    async claimEmail(id, now) {
+      const rows = check(
+        await db.from("runs").update({ emailed_at: now.toISOString() }).eq("id", id).is("emailed_at", null).select("id"),
+        "claim email",
+      ) as { id: string }[];
+      return rows.length > 0;
+    },
+    async releaseEmail(id) {
+      check(await db.from("runs").update({ emailed_at: null }).eq("id", id), "release email");
+    },
+    async addRunPages(runId, pages) {
+      if (!pages.length) return;
+      check(
+        await db
+          .from("run_pages")
+          .upsert(pages.map((p) => ({ run_id: runId, url: p.url, source_kind: p.sourceKind })), { onConflict: "run_id,url", ignoreDuplicates: true }),
+        "add run pages",
+      );
+    },
+    async pendingRunPages(runId, limit) {
+      const rows = check(
+        await db.from("run_pages").select("run_id, url, source_kind, status").eq("run_id", runId).eq("status", "pending").order("created_at").limit(limit),
+        "pending pages",
+      ) as PageRow[];
+      return rows.map(fromPageRow);
+    },
+    async setRunPageStatus(runId, url, status) {
+      check(await db.from("run_pages").update({ status }).eq("run_id", runId).eq("url", url), "set page status");
+    },
+    async listRunPages(runId) {
+      const rows = check(await db.from("run_pages").select("run_id, url, source_kind, status").eq("run_id", runId), "list pages") as PageRow[];
+      return rows.map(fromPageRow);
     },
 
     async geocodeGet(q) {

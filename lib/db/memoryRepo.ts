@@ -1,7 +1,9 @@
 import type { SettingsProposal } from "@/lib/data/AppData";
 import type { SettingsPatch } from "@/lib/settings/types";
 import type { Organization, Profile } from "@/lib/types";
+import { newUsage } from "@/lib/engine/usage";
 import { nameKey, USER_EVENT_FIELDS, USER_ORG_FIELDS, type Repo, type StoredEvent } from "./repo";
+import type { Run, RunPage } from "./runs";
 
 /** In-memory Repo for tests and local scripts. Same semantics as supabaseRepo. */
 export function createMemoryRepo(): Repo & { _events: Map<string, StoredEvent & { profileId: string }> } {
@@ -10,6 +12,8 @@ export function createMemoryRepo(): Repo & { _events: Map<string, StoredEvent & 
   const orgs = new Map<string, Organization & { profileId: string }>();
   const proposals = new Map<string, { profileId: string; proposal: SettingsProposal; patches: SettingsPatch[]; applied: boolean }>();
   const geo = new Map<string, { lat: number; lng: number } | null>();
+  const runs = new Map<string, Run>();
+  const runPages = new Map<string, RunPage>(); // key runId|url
   const clone = <T>(v: T): T => structuredClone(v);
   const strip = <T extends { profileId: string }>(v: T) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -102,6 +106,57 @@ export function createMemoryRepo(): Repo & { _events: Map<string, StoredEvent & 
       if (!p || p.profileId !== profileId || p.applied) return null;
       p.applied = true;
       return { proposal: clone(p.proposal), patches: clone(p.patches) };
+    },
+
+    async getRun(profileId, kind, weekKey) {
+      const r = [...runs.values()].find((x) => x.profileId === profileId && x.kind === kind && x.weekKey === weekKey);
+      return r ? clone(r) : null;
+    },
+    async getOrCreateRun(profileId, kind, weekKey, newId, first) {
+      const existing = [...runs.values()].find((x) => x.profileId === profileId && x.kind === kind && x.weekKey === weekKey);
+      if (existing) return clone(existing);
+      const run: Run = {
+        id: newId(), profileId, kind, weekKey, stage: first, cursor: { sources: 0, queries: 0 },
+        lockedUntil: null, emailedAt: null, usage: newUsage(), error: null,
+      };
+      runs.set(run.id, run);
+      return clone(run);
+    },
+    async lockRun(id, until, now) {
+      const r = runs.get(id);
+      if (!r || (r.lockedUntil && Date.parse(r.lockedUntil) > now.getTime())) return null;
+      r.lockedUntil = until.toISOString();
+      return clone(r);
+    },
+    async saveRun(id, patch) {
+      const r = runs.get(id);
+      if (r) Object.assign(r, clone(patch), { lockedUntil: null });
+    },
+    async claimEmail(id, now) {
+      const r = runs.get(id);
+      if (!r || r.emailedAt) return false;
+      r.emailedAt = now.toISOString();
+      return true;
+    },
+    async releaseEmail(id) {
+      const r = runs.get(id);
+      if (r) r.emailedAt = null;
+    },
+    async addRunPages(runId, pages) {
+      for (const p of pages) {
+        const key = `${runId}|${p.url}`;
+        if (!runPages.has(key)) runPages.set(key, { runId, url: p.url, sourceKind: p.sourceKind, status: "pending" });
+      }
+    },
+    async pendingRunPages(runId, limit) {
+      return [...runPages.values()].filter((p) => p.runId === runId && p.status === "pending").slice(0, limit).map(clone);
+    },
+    async setRunPageStatus(runId, url, status) {
+      const p = runPages.get(`${runId}|${url}`);
+      if (p) p.status = status;
+    },
+    async listRunPages(runId) {
+      return [...runPages.values()].filter((p) => p.runId === runId).map(clone);
     },
 
     async geocodeGet(q) {

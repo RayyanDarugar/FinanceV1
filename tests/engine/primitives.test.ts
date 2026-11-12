@@ -76,7 +76,7 @@ describe("fetchPageText", () => {
 describe("callJson", () => {
   const schema = z.object({ answer: z.string() });
 
-  test("returns the parsed output and adds token usage", async () => {
+  test("returns the parsed output and adds token usage and cost", async () => {
     const usage = newUsage();
     const client: LlmClient = {
       parse: vi.fn(async () => ({ parsed_output: { answer: "hi" }, stop_reason: "end_turn", usage: { input_tokens: 100, output_tokens: 20 } })),
@@ -84,6 +84,7 @@ describe("callJson", () => {
     expect(await callJson({ system: "s", user: "u", schema }, usage, client)).toEqual({ answer: "hi" });
     expect(usage.inputTokens).toBe(100);
     expect(usage.outputTokens).toBe(20);
+    expect(usage.costUsd).toBeCloseTo((100 * 4 + 20 * 20) / 1e6, 10);
   });
 
   test("retries once, then returns null after two bad responses without throwing", async () => {

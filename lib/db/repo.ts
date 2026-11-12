@@ -1,5 +1,6 @@
 import type { SettingsProposal } from "@/lib/data/AppData";
 import type { SettingsPatch } from "@/lib/settings/types";
+import type { RunStore } from "./runs";
 import type { EventItem, EventMark, HideReason, Organization, OrgStatus, Outcome, Profile } from "@/lib/types";
 
 /** An event as stored: the display fields plus the dedupe key and the raw extraction. */
@@ -11,7 +12,7 @@ export const USER_EVENT_FIELDS = ["mark", "hideReason", "outcome", "outcomeNote"
 export const USER_ORG_FIELDS = ["status", "followedAt", "lastContactedAt"] as const;
 
 /** Server-only storage. Implemented by memoryRepo (tests) and supabaseRepo (live). */
-export interface Repo {
+export interface Repo extends RunStore {
   putProfile(p: Profile, passcodeHash: string): Promise<void>;
   getProfile(id: string): Promise<Profile | null>;
   getPasscodeHash(id: string): Promise<string | null>;

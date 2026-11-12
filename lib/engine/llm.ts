@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import { estimateCostUsd, llmModel, type Usage } from "./usage";
+import { llmBudgetUsd, llmModel, priceTokens, type Usage } from "./usage";
 
 /** The slice of the SDK we use, so tests can stand in for it. */
 export interface LlmClient {
@@ -30,6 +30,8 @@ export interface CallJsonOpts<T> {
   schema: z.ZodType<T>;
   maxTokens?: number;
   effort?: "low" | "medium" | "high";
+  /** Defaults to llmModel(). Extraction passes extractModel(). */
+  model?: string;
 }
 
 /**
@@ -38,11 +40,12 @@ export interface CallJsonOpts<T> {
  * Throws BudgetExceededError before calling when this Usage has already spent LLM_BUDGET_USD.
  */
 export async function callJson<T>(opts: CallJsonOpts<T>, usage: Usage, client: LlmClient = defaultClient()): Promise<T | null> {
-  const budget = Number(process.env.LLM_BUDGET_USD || "2");
-  if (estimateCostUsd(usage) >= budget) throw new BudgetExceededError(`LLM budget of $${budget} reached`);
+  const budget = llmBudgetUsd();
+  if (usage.costUsd >= budget) throw new BudgetExceededError(`LLM budget of $${budget} reached`);
+  const model = opts.model ?? llmModel();
 
   const params = {
-    model: llmModel(),
+    model,
     max_tokens: opts.maxTokens ?? 8000,
     // Stable instructions first so repeated calls in a run hit the prompt cache.
     system: [{ type: "text", text: opts.system, cache_control: { type: "ephemeral" } }],
@@ -53,8 +56,11 @@ export async function callJson<T>(opts: CallJsonOpts<T>, usage: Usage, client: L
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await client.parse(params);
-      usage.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
-      usage.outputTokens += res.usage.output_tokens ?? 0;
+      const input = (res.usage.input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
+      const output = res.usage.output_tokens ?? 0;
+      usage.inputTokens += input;
+      usage.outputTokens += output;
+      usage.costUsd += priceTokens(model, input, output);
       if (res.stop_reason === "refusal" || res.parsed_output == null) continue;
       const checked = opts.schema.safeParse(res.parsed_output);
       if (checked.success) return checked.data;

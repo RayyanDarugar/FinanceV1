@@ -2,7 +2,7 @@ import { z } from "zod";
 import { localDate } from "@/lib/domain/dates";
 import type { SourceKind } from "@/lib/types";
 import { callJson as realCallJson } from "./llm";
-import type { Usage } from "./usage";
+import { extractModel, type Usage } from "./usage";
 
 export const RawEventSchema = z.object({
   title: z.string(),
@@ -62,6 +62,6 @@ Page URL: ${page.url}
 <page>
 ${page.text}
 </page>`;
-  const out = await callJson({ system: SYSTEM, user, schema: ExtractSchema, maxTokens: 8000, effort: "low" }, usage);
+  const out = await callJson({ system: SYSTEM, user, schema: ExtractSchema, maxTokens: 8000, effort: "low", model: extractModel() }, usage);
   return out?.events ?? [];
 }
