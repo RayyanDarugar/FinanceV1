@@ -8,7 +8,7 @@ export interface LlmClient {
   parse(params: Record<string, unknown>): Promise<{
     parsed_output: unknown;
     stop_reason: string | null;
-    usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null };
+    usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
   }>;
 }
 
@@ -53,7 +53,7 @@ export async function callJson<T>(opts: CallJsonOpts<T>, usage: Usage, client: L
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await client.parse(params);
-      usage.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0);
+      usage.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
       usage.outputTokens += res.usage.output_tokens ?? 0;
       if (res.stop_reason === "refusal" || res.parsed_output == null) continue;
       const checked = opts.schema.safeParse(res.parsed_output);
