@@ -67,6 +67,14 @@ test("speaking boost is dropped once the pre-approval deadline has passed", () =
   expect(a.score).toBe(b.score);
 });
 
+test("at most 2 events per host make the list, so one club can't crowd it", () => {
+  const rotary = [1, 2, 3, 4].map((i) => makeEvent({ host: "Rotary Club of Rancho Santa Fe", title: `Lunch ${i}`, subScores: { audienceFit: 9, wealth: 9 } }));
+  const others = [1, 2, 3, 4].map((i) => makeEvent({ host: `Host ${i}`, subScores: { audienceFit: 5, wealth: 5 } }));
+  const ranked = rankEvents([...rotary, ...others], p, NOW);
+  expect(ranked.filter((e) => e.host === "Rotary Club of Rancho Santa Fe")).toHaveLength(2);
+  expect(ranked).toHaveLength(6);
+});
+
 test("unscored events (subScores null) are not ranked", () => {
   expect(rankEvents([makeEvent({ subScores: null })], p, NOW)).toHaveLength(0);
 });

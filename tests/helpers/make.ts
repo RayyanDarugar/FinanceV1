@@ -30,7 +30,7 @@ export function makeEvent(o: Partial<EventItem> = {}): EventItem {
   return {
     id: `e${n}`,
     title: `Event ${n}`,
-    host: "Host",
+    host: `Host ${n}`,
     orgId: null,
     startsAt: "2026-12-10T18:30:00-08:00",
     endsAt: null,

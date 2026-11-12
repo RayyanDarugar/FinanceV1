@@ -1,7 +1,7 @@
 import type { Repo, StoredEvent } from "@/lib/db/repo";
 import { STAGES, type Run, type RunKind, type Stage } from "@/lib/db/runs";
 import { haversineMiles, type LatLng } from "@/lib/domain/geo";
-import { computeScore, WINDOW_DAYS } from "@/lib/domain/rank";
+import { computeScore, isEligible, WINDOW_DAYS } from "@/lib/domain/rank";
 import type { Profile, SourceKind } from "@/lib/types";
 import { dedupeKey, findMatch, mergeCandidates, type Candidate } from "./dedupe";
 import type { RawEvent } from "./extract";
@@ -24,12 +24,16 @@ export interface RunDeps {
   extract: (page: { url: string; text: string }, kind: SourceKind, now: Date, usage: Usage) => Promise<RawEvent[]>;
   geocode: (address: string | null, town: string | null, home: LatLng, usage: Usage) => Promise<LatLng | null>;
   score: (events: (StoredEvent & { speakingAsked: boolean })[], p: Profile, feedback: string, usage: Usage) => Promise<Map<string, ScoreResult>>;
+  /** Cheap 0–10 fit per event (bulk model). */
+  prescreen: (events: StoredEvent[], p: Profile, usage: Usage) => Promise<Map<string, number>>;
   /** Organization suggestions (Task 15). */
   orgs: (p: Profile, run: Run, now: Date, usage: Usage) => Promise<void>;
   sendWeekly: (p: Profile, now: Date) => Promise<void>;
 }
 
-const BATCH = { searches: 10, extract: 3, geocode: 10, score: 16 };
+const BATCH = { searches: 10, extract: 3, geocode: 10, score: 16, prescreen: 40 };
+/** Pre-screen fit (0–10) an event needs before the expensive scorer writes its reasons. */
+const PRESCREEN_MIN = 6;
 const MAX_PAGES = 120;
 const LOCK_MS = 55_000;
 const DAY = 86_400_000;
@@ -173,8 +177,31 @@ async function step(stage: Stage, run: Run, p: Profile, deps: RunDeps, now: Date
 
     case "score": {
       const all = await repo.listEvents(p.id);
-      const todo = all.filter((e) => upcoming(e) && e.subScores === null && e.raw.scoreTried !== run.id).slice(0, BATCH.score);
-      if (!todo.length) return { moreWork: false };
+      const candidates = all.filter((e) => upcoming(e) && e.subScores === null && e.raw.scoreTried !== run.id);
+      if (!candidates.length) return { moreWork: false };
+
+      // 1. Ineligible (too far, too pricey, excluded) never cost an LLM call.
+      const ineligible = candidates.filter((e) => !isEligible(e, p, now));
+      for (const e of ineligible) await repo.updateEvent(e.id, { raw: { ...e.raw, scoreTried: run.id } });
+      const eligible = candidates.filter((e) => isEligible(e, p, now));
+
+      // 2. Cheap pre-screen; low fits stay unscored (never shown).
+      const needPre = eligible.filter((e) => typeof e.raw.prescreen !== "number").slice(0, BATCH.prescreen);
+      if (needPre.length) {
+        const fits = await deps.prescreen(needPre, p, usage);
+        for (const e of needPre) {
+          const fit = fits.get(e.id) ?? PRESCREEN_MIN; // unrated: give it the benefit of the doubt
+          await repo.updateEvent(e.id, { raw: { ...e.raw, prescreen: fit, ...(fit < PRESCREEN_MIN ? { scoreTried: run.id } : {}) } });
+        }
+        return { moreWork: true };
+      }
+
+      // 3. Full scoring (reasons, mode, compliance) for the promising ones, best first.
+      const todo = eligible
+        .filter((e) => (e.raw.prescreen as number) >= PRESCREEN_MIN)
+        .sort((a, b) => (b.raw.prescreen as number) - (a.raw.prescreen as number))
+        .slice(0, BATCH.score);
+      if (!todo.length) return { moreWork: ineligible.length > 0 };
       const orgs = await repo.listOrgs(p.id);
       const feedback = summarizeFeedback(
         all.filter((e) => e.mark === "hidden"),

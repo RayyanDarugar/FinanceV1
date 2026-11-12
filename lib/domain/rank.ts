@@ -40,10 +40,11 @@ export function rankEvents(
   events: EventItem[],
   p: Profile,
   now: Date,
-  opts: { max?: number; min?: number; minConfidence?: number } = {},
+  opts: { max?: number; min?: number; minConfidence?: number; perHost?: number } = {},
 ): EventItem[] {
-  const { max = 10, min = 5, minConfidence = 0.5 } = opts;
-  const scored = events
+  const { max = 10, min = 5, minConfidence = 0.5, perHost = 2 } = opts;
+  const perHostCount = new Map<string, number>();
+  const sorted = events
     .filter((e) => e.subScores !== null && isEligible(e, p, now))
     .map((e) => {
       // Too late to get approval to speak: score it as an attend-only event.
@@ -52,6 +53,14 @@ export function rankEvents(
       return { ...e, score: computeScore(late ? { ...e, speaking: null } : e, p) };
     })
     .sort((a, b) => b.score - a.score);
+  // Variety: at most `perHost` picks per organizer (events she saved or is going to are always kept).
+  const scored = sorted.filter((e) => {
+    if (e.mark === "saved" || e.mark === "going") return true;
+    const key = e.host.trim().toLowerCase();
+    const n = perHostCount.get(key) ?? 0;
+    perHostCount.set(key, n + 1);
+    return n < perHost;
+  });
   const confident = scored.filter((e) => e.confidence >= minConfidence).slice(0, max);
   if (confident.length >= min) return confident;
   const fill = scored.filter((e) => e.confidence < minConfidence).slice(0, min - confident.length);

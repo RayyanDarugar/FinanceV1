@@ -5,7 +5,7 @@ import { fetchPageText } from "./fetchPage";
 import { geocode } from "./geocode";
 import { runOrgsStage } from "./orgs";
 import type { RunDeps } from "./run";
-import { scoreEvents } from "./score";
+import { prescreenEvents, scoreEvents } from "./score";
 import { tavilySearch } from "./search";
 
 /** Production wiring for advanceRun. Email sending is plugged in by the caller (lib/email/weekly). */
@@ -20,6 +20,7 @@ export function liveRunDeps(sendWeekly: RunDeps["sendWeekly"]): RunDeps {
     extract: (page, kind, now, usage) => extractEvents(page, kind, now, usage),
     geocode: (address, town, home, usage) => geocode(address, town, home, usage, { repo }),
     score: (events, p, feedback, usage) => scoreEvents(events, p, feedback, usage),
+    prescreen: (events, p, usage) => prescreenEvents(events, p, usage),
     orgs: (p, run, now, usage) => runOrgsStage(repo, p, run, now, usage),
     sendWeekly,
   };

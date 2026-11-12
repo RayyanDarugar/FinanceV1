@@ -37,6 +37,7 @@ async function setup(over: Partial<RunDeps> = {}) {
       audienceFit: 8, wealth: 7, speaking: e.speakingAsked ? "asked" as const : null, suggestedMode: "attend" as const,
       nextStep: "n", whyGo: "w", whyFits: "f", needsPreapproval: false,
     }]))),
+    prescreen: vi.fn(async (events) => new Map(events.map((e) => [e.id, 8]))),
     orgs: vi.fn(async () => {}),
     sendWeekly: vi.fn(async () => {
       sent.push("email");
@@ -179,4 +180,28 @@ test("run window is Monday 03:00–06:59 Pacific", async () => {
   expect(inRunWindow(new Date("2026-11-16T15:00:00Z"), TZ)).toBe(false); // Mon 7:00
   expect(inRunWindow(new Date("2026-11-16T10:59:00Z"), TZ)).toBe(false); // Mon 2:59
   expect(inRunWindow(new Date("2026-11-17T11:00:00Z"), TZ)).toBe(false); // Tue
+});
+
+test("pre-screen: low-fit events never reach full scoring, ineligible ones skip both", async () => {
+  const { profile, deps, repo } = await setup({
+    extract: vi.fn(async (page: { url: string }) =>
+      page.url.includes("chamber.org")
+        ? [
+            raw("Women in Business Lunch"),
+            raw("Kids Storytime", { venueName: "Library", startsAt: "2026-12-11T10:00:00-08:00" }),
+            raw("Far Away Gala", { townText: "Los Angeles", address: "LA", startsAt: "2026-12-12T18:00:00-08:00", venueName: "LA Hall" }),
+          ]
+        : [],
+    ),
+    geocode: vi.fn(async (_a, town: string | null) => (town === "Los Angeles" ? { lat: 34.05, lng: -118.24 } : { lat: 33.1, lng: -117.3 })),
+    prescreen: vi.fn(async (events) => new Map(events.map((e) => [e.id, e.title.includes("Kids") ? 2 : 8]))),
+  });
+  await runToDone(deps, profile.id);
+  const scoredTitles = (deps.score as ReturnType<typeof vi.fn>).mock.calls.flatMap((c) => (c[0] as { title: string }[]).map((e) => e.title));
+  expect(scoredTitles).toEqual(["Women in Business Lunch"]);
+  const prescreened = (deps.prescreen as ReturnType<typeof vi.fn>).mock.calls.flatMap((c) => (c[0] as { title: string }[]).map((e) => e.title));
+  expect(prescreened).not.toContain("Far Away Gala");
+  const kids = (await repo.listEvents(profile.id)).find((e) => e.title === "Kids Storytime")!;
+  expect(kids.subScores).toBeNull();
+  expect(kids.raw.prescreen).toBe(2);
 });

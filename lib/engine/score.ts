@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { EventItem, Mode, Profile, SpeakingSignal } from "@/lib/types";
 import { callJson as realCallJson } from "./llm";
-import type { Usage } from "./usage";
+import { extractModel, type Usage } from "./usage";
 
 export interface ScoreResult {
   audienceFit: number;
@@ -63,6 +63,33 @@ function eventLine(e: EventItem & { speakingAsked: boolean }): string {
     speakerAsked: e.speakingAsked,
     description: e.description.slice(0, 600),
   });
+}
+
+const PrescreenSchema = z.object({ fits: z.array(z.object({ id: z.string(), fit: z.number() })) });
+
+/**
+ * Cheap first pass (bulk model): a 0–10 fit for each event, 40 per call, so the expensive scorer only
+ * writes reasons for events that could make her list. Missing ids are left out of the map.
+ */
+export async function prescreenEvents(
+  events: EventItem[],
+  p: Profile,
+  usage: Usage,
+  deps: { callJson?: typeof realCallJson } = {},
+): Promise<Map<string, number>> {
+  const callJson = deps.callJson ?? realCallJson;
+  const out = new Map<string, number>();
+  const system = `Rate how well each event's likely attendees match this ideal client, 0–10 (10 = most of the room fits; children's, student-only, industry-peer or unrelated hobby events score 0–2). Speaking or relationship-building chances with fitting groups count in its favor.
+Ideal client: ${p.idealClient}
+Priorities: ${p.priorities}`;
+  for (let i = 0; i < events.length; i += 40) {
+    const chunk = events.slice(i, i + 40);
+    const lines = chunk.map((e) => JSON.stringify({ id: e.id, title: e.title, host: e.host, town: e.townText, cost: e.costUsd, about: e.description.slice(0, 200) }));
+    const res = await callJson({ system, user: lines.join("\n"), schema: PrescreenSchema, maxTokens: 3000, effort: "low", model: extractModel() }, usage);
+    const ids = new Set(chunk.map((e) => e.id));
+    for (const f of res?.fits ?? []) if (ids.has(f.id)) out.set(f.id, Math.max(0, Math.min(10, Math.round(f.fit))));
+  }
+  return out;
 }
 
 /** Scores up to 8 events per LLM call. Events the model skips are left out of the result (unscored this run). */
