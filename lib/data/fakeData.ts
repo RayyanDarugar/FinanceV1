@@ -1,6 +1,8 @@
 import { orgNudges } from "@/lib/domain/nudges";
 import { rankEvents } from "@/lib/domain/rank";
 import { makeFixtures } from "@/lib/fixtures";
+import { simpleParse } from "@/lib/settings/simpleParse";
+import type { SettingsPatch } from "@/lib/settings/types";
 import type { EventItem, Organization, Profile } from "@/lib/types";
 import { UNSUPPORTED_CHANGE, type AppData, type SettingsProposal } from "./AppData";
 
@@ -13,11 +15,7 @@ interface State {
   proposals: Record<string, { proposal: SettingsProposal; apply: Patch[] }>;
 }
 
-type Patch =
-  | { kind: "profile"; patch: Partial<Profile> }
-  | { kind: "org_status"; orgId: string; status: Organization["status"] };
-
-const money = (n: number) => `$${n.toLocaleString("en-US")}`;
+type Patch = SettingsPatch;
 
 /** Clickable-prototype data: fixtures + browser storage. Understands a few canned settings requests. */
 export function createFakeData(storage: Storage, now: () => Date): AppData {
@@ -40,40 +38,6 @@ export function createFakeData(storage: Storage, now: () => Date): AppData {
   };
   const findEvent = (id: string) => state.events.find((e) => e.id === id);
   const findOrg = (id: string) => state.orgs.find((o) => o.id === id);
-
-  function parse(text: string): { changes: SettingsProposal["changes"]; apply: Patch[] } | null {
-    const t = text.trim();
-    const p = state.profile;
-    const radius = t.match(/within\s+(\d+)\s*mi/i);
-    if (radius) {
-      const to = Number(radius[1]);
-      if (to < 1 || to > 100) return null;
-      return {
-        changes: [{ field: "radiusMiles", from: String(p.radiusMiles), to: String(to), text: `Radius: ${p.radiusMiles} → ${to} miles` }],
-        apply: [{ kind: "profile", patch: { radiusMiles: to } }],
-      };
-    }
-    const cost = t.match(/(?:under|below|less than|max(?:imum)?)\s*\$?\s*([\d,]+)/i);
-    if (cost) {
-      const to = Number(cost[1].replace(/,/g, ""));
-      return {
-        changes: [{ field: "costCeilingUsd", from: String(p.costCeilingUsd), to: String(to), text: `Cost limit: ${money(p.costCeilingUsd)} → ${money(to)}` }],
-        apply: [{ kind: "profile", patch: { costCeilingUsd: to } }],
-      };
-    }
-    const follow = t.match(/^(un)?follow\s+(?:the\s+)?(.+)$/i);
-    if (follow) {
-      const name = follow[2].trim().toLowerCase();
-      const org = state.orgs.find((o) => o.name.toLowerCase().includes(name));
-      if (!org) return null;
-      const status = follow[1] ? "not_interested" : "following";
-      return {
-        changes: [{ field: "follow_org", from: org.status, to: status, text: `${follow[1] ? "Stop following" : "Follow"}: ${org.name}` }],
-        apply: [{ kind: "org_status", orgId: org.id, status }],
-      };
-    }
-    return null;
-  }
 
   return {
     async getProfile() {
@@ -136,7 +100,7 @@ export function createFakeData(storage: Storage, now: () => Date): AppData {
     },
     async proposeSettingsChange(text) {
       const id = `prop-${now().getTime()}-${Math.random().toString(36).slice(2, 7)}`;
-      const parsed = parse(text);
+      const parsed = simpleParse(text, state.profile, state.orgs);
       const proposal: SettingsProposal = parsed
         ? { id, changes: parsed.changes, unsupported: null }
         : { id, changes: [], unsupported: UNSUPPORTED_CHANGE };
@@ -149,6 +113,7 @@ export function createFakeData(storage: Storage, now: () => Date): AppData {
       if (!entry) return;
       for (const p of entry.apply) {
         if (p.kind === "profile") state.profile = { ...state.profile, ...p.patch };
+        else if (p.kind === "org_create") state.orgs.push(p.org);
         else {
           const o = findOrg(p.orgId);
           if (o) {

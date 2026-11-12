@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppData } from "./AppData";
 import { createFakeData } from "./fakeData";
+import { createHttpData } from "./httpData";
 
 type Ctx = { data: AppData; version: number; refresh: () => void };
 
@@ -11,10 +12,7 @@ const DataContext = createContext<Ctx | null>(null);
 let clientData: AppData | null = null;
 
 function makeClientData(): AppData {
-  if (process.env.NEXT_PUBLIC_DATA_MODE === "live") {
-    // Swapped to the HTTP implementation in Milestone 2 (Task 8).
-    throw new Error("Live data mode is not wired yet");
-  }
+  if (process.env.NEXT_PUBLIC_DATA_MODE === "live") return createHttpData();
   return createFakeData(window.localStorage, () => new Date());
 }
 
