@@ -2,7 +2,7 @@ import type { SettingsProposal } from "@/lib/data/AppData";
 import type { SettingsPatch } from "@/lib/settings/types";
 import type { Organization, Profile } from "@/lib/types";
 import { newUsage } from "@/lib/engine/usage";
-import { nameKey, USER_EVENT_FIELDS, USER_ORG_FIELDS, type Repo, type StoredEvent } from "./repo";
+import { assertUniqueKeys, keptOnRefind, nameKey, USER_ORG_FIELDS, type Repo, type StoredEvent } from "./repo";
 import type { Run, RunPage } from "./runs";
 
 /** In-memory Repo for tests and local scripts. Same semantics as supabaseRepo. */
@@ -46,11 +46,13 @@ export function createMemoryRepo(): Repo & { _events: Map<string, StoredEvent & 
       return e ? strip(e) : null;
     },
     async upsertEvents(profileId, _runId, list) {
+      assertUniqueKeys(list); // Postgres rejects these too
       for (const incoming of list) {
         const existing = [...events.values()].find((e) => e.profileId === profileId && e.dedupeKey === incoming.dedupeKey);
         if (existing) {
-          const keep = Object.fromEntries(USER_EVENT_FIELDS.map((k) => [k, existing[k]]));
-          events.set(existing.id, { ...clone(incoming), ...keep, id: existing.id, profileId });
+          const copy = clone(incoming);
+          const keep = keptOnRefind(existing, copy);
+          events.set(existing.id, { ...copy, ...keep, id: existing.id, profileId });
         } else {
           events.set(incoming.id, { ...clone(incoming), profileId });
         }
@@ -117,7 +119,7 @@ export function createMemoryRepo(): Repo & { _events: Map<string, StoredEvent & 
       if (existing) return clone(existing);
       const run: Run = {
         id: newId(), profileId, kind, weekKey, stage: first, cursor: { sources: 0, queries: 0 },
-        lockedUntil: null, emailedAt: null, usage: newUsage(), error: null,
+        lockedUntil: null, lockToken: null, emailedAt: null, usage: newUsage(), error: null,
       };
       runs.set(run.id, run);
       return clone(run);
@@ -126,11 +128,16 @@ export function createMemoryRepo(): Repo & { _events: Map<string, StoredEvent & 
       const r = runs.get(id);
       if (!r || (r.lockedUntil && Date.parse(r.lockedUntil) > now.getTime())) return null;
       r.lockedUntil = until.toISOString();
+      r.lockToken = crypto.randomUUID();
       return clone(r);
     },
-    async saveRun(id, patch) {
+    async saveRun(id, patch, token) {
       const r = runs.get(id);
-      if (r) Object.assign(r, clone(patch), { lockedUntil: null });
+      if (r && r.lockToken === token) Object.assign(r, clone(patch), { lockedUntil: null, lockToken: null });
+    },
+    async checkpointRun(id, patch, token) {
+      const r = runs.get(id);
+      if (r && r.lockToken === token) Object.assign(r, clone(patch));
     },
     async claimEmail(id, now) {
       const r = runs.get(id);

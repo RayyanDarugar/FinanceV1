@@ -13,6 +13,8 @@ export interface Run {
   stage: Stage;
   cursor: { sources: number; queries: number };
   lockedUntil: string | null;
+  /** Set by lockRun; saves from a call whose lock was taken over are ignored. */
+  lockToken: string | null;
   emailedAt: string | null;
   usage: Usage;
   error: string | null;
@@ -31,8 +33,10 @@ export interface RunStore {
   getOrCreateRun(profileId: string, kind: RunKind, weekKey: string, newId: () => string, first: Stage): Promise<Run>;
   /** Atomically takes the run's lock if free (or expired). Null when another call holds it. */
   lockRun(id: string, until: Date, now: Date): Promise<Run | null>;
-  /** Saves progress and releases the lock. */
-  saveRun(id: string, patch: Partial<Pick<Run, "stage" | "cursor" | "usage" | "error">>): Promise<void>;
+  /** Saves progress and releases the lock — only if `lockToken` still holds it. */
+  saveRun(id: string, patch: Partial<Pick<Run, "stage" | "cursor" | "usage" | "error">>, lockToken: string): Promise<void>;
+  /** Saves progress and keeps the lock (after every step, so a killed function loses at most one step). */
+  checkpointRun(id: string, patch: Partial<Pick<Run, "stage" | "cursor" | "usage" | "error">>, lockToken: string): Promise<void>;
   /** Atomically sets emailedAt if unset. True when this caller won. */
   claimEmail(id: string, now: Date): Promise<boolean>;
   releaseEmail(id: string): Promise<void>;

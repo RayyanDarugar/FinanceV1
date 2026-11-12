@@ -46,7 +46,7 @@ Useful scripts (all read `.env.local`):
    Remove `DEMO_PASSCODE` from Production once live.
 3. **Profile.** `npx tsx --env-file=.env.local scripts/seed-profile.ts "<her passcode>"`. Temporarily set `emailTo` to just your address for the first run if you want to check it before she gets one (edit the row in Supabase → Table editor → profiles → data).
 4. **Deploy.** `vercel deploy --prod` (or push to `main` once the Git integration is connected).
-5. **Organizations, once.** Call until it returns `"done": true` (each call ~40s):
+5. **Organizations, once.** Call until it returns `"done": true` (each call up to ~2 min):
    ```bash
    curl -X POST "https://finance-v1.vercel.app/api/run/advance?kind=org_seed" -H "x-run-secret: $RUN_SECRET"
    ```

@@ -3,13 +3,14 @@ import { profileId, serverRepo } from "@/lib/data/server";
 import type { RunKind } from "@/lib/db/runs";
 import { sendWeeklyEmail } from "@/lib/email/weekly";
 import { liveRunDeps } from "@/lib/engine/liveDeps";
-import { advanceRun, inRunWindow } from "@/lib/engine/run";
+import { advanceRun, inRunWindow, windowEnding } from "@/lib/engine/run";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Vercel Hobby with Fluid compute allows up to 300s. The run checkpoints after every step regardless.
+export const maxDuration = 300;
 
 /**
- * Called by cron-jobs.org every few minutes during the Monday window. Each call does ~40s of work and saves progress.
+ * Called by cron-jobs.org every few minutes during the Monday window. Each call works up to ~2 min, saving after every step.
  *   POST /api/run/advance?kind=weekly|org_seed[&force=1]   header: x-run-secret
  */
 async function handle(req: Request) {
@@ -28,7 +29,7 @@ async function handle(req: Request) {
     return NextResponse.json({ skipped: "outside the Monday run window" });
   }
   const deps = liveRunDeps((p, at) => sendWeeklyEmail(repo, p, at));
-  const result = await advanceRun(deps, pid, now, kind);
+  const result = await advanceRun(deps, pid, now, kind, { finishNow: kind === "weekly" && !force && windowEnding(now, profile.timezone) });
   return NextResponse.json(result);
 }
 

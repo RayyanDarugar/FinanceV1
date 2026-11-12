@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Organization, Profile } from "@/lib/types";
 import { newUsage } from "@/lib/engine/usage";
-import { nameKey, USER_EVENT_FIELDS, USER_ORG_FIELDS, type Repo, type StoredEvent } from "./repo";
+import { assertUniqueKeys, keptOnRefind, nameKey, USER_ORG_FIELDS, type Repo, type StoredEvent } from "./repo";
 import type { Run, RunPage } from "./runs";
 import { supabase } from "./supabase";
 
@@ -12,11 +12,11 @@ function check<T>(res: { data: T; error: { message: string } | null }, what: str
 
 type RunRow = {
   id: string; profile_id: string; kind: Run["kind"]; week_key: string; stage: Run["stage"]; cursor: Run["cursor"];
-  locked_until: string | null; emailed_at: string | null; usage: Run["usage"]; error: string | null;
+  locked_until: string | null; lock_token: string | null; emailed_at: string | null; usage: Run["usage"]; error: string | null;
 };
 const fromRunRow = (r: RunRow): Run => ({
   id: r.id, profileId: r.profile_id, kind: r.kind, weekKey: r.week_key, stage: r.stage, cursor: r.cursor,
-  lockedUntil: r.locked_until, emailedAt: r.emailed_at, usage: { ...newUsage(), ...r.usage }, error: r.error,
+  lockedUntil: r.locked_until, lockToken: r.lock_token, emailedAt: r.emailed_at, usage: { ...newUsage(), ...r.usage }, error: r.error,
 });
 type PageRow = { run_id: string; url: string; source_kind: RunPage["sourceKind"]; status: RunPage["status"] };
 const fromPageRow = (r: PageRow): RunPage => ({ runId: r.run_id, url: r.url, sourceKind: r.source_kind, status: r.status });
@@ -74,17 +74,21 @@ export function createSupabaseRepo(db: SupabaseClient = supabase()): Repo {
     },
     async upsertEvents(profileId, runId, list) {
       if (!list.length) return;
+      assertUniqueKeys(list);
       const keys = list.map((e) => e.dedupeKey);
-      const existing = check(
-        await db.from("events").select("id, dedupe_key, data").eq("profile_id", profileId).in("dedupe_key", keys),
-        "find existing events",
-      ) as { id: string; dedupe_key: string; data: StoredEvent }[];
+      const existing = (
+        check(
+          await db.from("events").select("id, dedupe_key, data, raw").eq("profile_id", profileId).in("dedupe_key", keys),
+          "find existing events",
+        ) as EventRow[]
+      ).map((r) => ({ id: r.id, dedupe_key: r.dedupe_key, data: fromEventRow(r) }));
       const byKey = new Map(existing.map((r) => [r.dedupe_key, r]));
       const rows = list.map((incoming) => {
         const prev = byKey.get(incoming.dedupeKey);
+        const copy = { ...incoming };
+        const keep = prev ? keptOnRefind(prev.data, copy) : {};
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { dedupeKey, raw, ...data } = incoming;
-        const keep = prev ? Object.fromEntries(USER_EVENT_FIELDS.map((k) => [k, prev.data[k]])) : {};
+        const { dedupeKey, raw, ...data } = copy;
         const id = prev?.id ?? incoming.id;
         return {
           id,
@@ -196,7 +200,7 @@ export function createSupabaseRepo(db: SupabaseClient = supabase()): Repo {
       const rows = check(
         await db
           .from("runs")
-          .update({ locked_until: until.toISOString() })
+          .update({ locked_until: until.toISOString(), lock_token: crypto.randomUUID() })
           .eq("id", id)
           .or(`locked_until.is.null,locked_until.lt.${now.toISOString()}`)
           .select("*"),
@@ -204,13 +208,20 @@ export function createSupabaseRepo(db: SupabaseClient = supabase()): Repo {
       ) as RunRow[];
       return rows[0] ? fromRunRow(rows[0]) : null;
     },
-    async saveRun(id, patch) {
+    async saveRun(id, patch, token) {
       check(
         await db
           .from("runs")
-          .update({ ...patch, locked_until: null, updated_at: new Date().toISOString() })
-          .eq("id", id),
+          .update({ ...patch, locked_until: null, lock_token: null, updated_at: new Date().toISOString() })
+          .eq("id", id)
+          .eq("lock_token", token),
         "save run",
+      );
+    },
+    async checkpointRun(id, patch, token) {
+      check(
+        await db.from("runs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).eq("lock_token", token),
+        "checkpoint run",
       );
     },
     async claimEmail(id, now) {

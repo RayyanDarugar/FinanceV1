@@ -13,7 +13,7 @@ export function liveRunDeps(sendWeekly: RunDeps["sendWeekly"]): RunDeps {
   const repo = serverRepo();
   return {
     repo,
-    timeBudgetMs: 40_000,
+    timeBudgetMs: 120_000, // start no new step after 2 min; worst step ≈ 10s fetch + 90s LLM, well under maxDuration 300
     newId: () => crypto.randomUUID(),
     search: (q, usage) => tavilySearch(q, usage),
     fetchPage: (url, usage) => fetchPageText(url, usage),

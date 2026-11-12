@@ -31,11 +31,12 @@ export interface RunDeps {
   sendWeekly: (p: Profile, now: Date) => Promise<void>;
 }
 
-const BATCH = { searches: 10, extract: 3, geocode: 10, score: 16, prescreen: 40 };
+const BATCH = { searches: 10, extract: 3, geocode: 10, score: 8, prescreen: 40 };
 /** Pre-screen fit (0–10) an event needs before the expensive scorer writes its reasons. */
 const PRESCREEN_MIN = 6;
 const MAX_PAGES = 120;
-const LOCK_MS = 55_000;
+/** Longer than the route's maxDuration (300s), so a live call can't lose its lock mid-run. */
+const LOCK_MS = 330_000;
 const DAY = 86_400_000;
 
 /** ISO week (e.g. "2026-W47") of `now` in the profile's time zone. */
@@ -58,6 +59,13 @@ export function inRunWindow(now: Date, tz: string): boolean {
   const weekday = parts.find((x) => x.type === "weekday")?.value;
   const hour = Number(parts.find((x) => x.type === "hour")?.value);
   return weekday === "Mon" && hour >= 3 && hour < 7;
+}
+
+/** Last half hour of the Monday window: time to send whatever is ready. */
+export function windowEnding(now: Date, tz: string): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "numeric", minute: "numeric", hourCycle: "h23" }).formatToParts(now);
+  const get = (t: string) => parts.find((x) => x.type === t)?.value;
+  return get("weekday") === "Mon" && Number(get("hour")) * 60 + Number(get("minute")) >= 6 * 60 + 30;
 }
 
 const hostOf = (url: string) => {
@@ -142,19 +150,24 @@ async function step(stage: Stage, run: Run, p: Profile, deps: RunDeps, now: Date
         }),
       );
       const budgetHit = results.some((r) => r.status === "rejected" && r.reason instanceof BudgetExceededError);
+      const candidates = mergeCandidates(results.flatMap((r) => (r.status === "fulfilled" ? r.value : [])), p.timezone);
+      if (candidates.length) {
+        const [stored, orgs] = await Promise.all([repo.listEvents(p.id), repo.listOrgs(p.id)]);
+        // Two candidates can each match the same stored event; keep the more confident one per key.
+        const byKey = new Map<string, Candidate>();
+        for (const c of candidates) {
+          const key = findMatch(c, stored, p.timezone) ?? dedupeKey(c.title, c.startsAt!, p.timezone);
+          const prev = byKey.get(key);
+          if (!prev || c.confidence > prev.confidence) byKey.set(key, c);
+        }
+        const rows = [...byKey].map(([key, c]) => toStored(c, key, matchOrgId(c.host, orgs), now, deps.newId, run.id));
+        await repo.upsertEvents(p.id, run.id, rows);
+      }
+      // Only mark pages done once their events are safely stored.
       for (let i = 0; i < pages.length; i++) {
         const r = results[i];
         if (r.status === "rejected" && r.reason instanceof BudgetExceededError) continue; // stays pending
         await repo.setRunPageStatus(run.id, pages[i].url, r.status === "fulfilled" ? "extracted" : "failed");
-      }
-      const candidates = mergeCandidates(results.flatMap((r) => (r.status === "fulfilled" ? r.value : [])), p.timezone);
-      if (candidates.length) {
-        const [stored, orgs] = await Promise.all([repo.listEvents(p.id), repo.listOrgs(p.id)]);
-        const rows = candidates.map((c) => {
-          const key = findMatch(c, stored, p.timezone) ?? dedupeKey(c.title, c.startsAt!, p.timezone);
-          return toStored(c, key, matchOrgId(c.host, orgs), now, deps.newId, run.id);
-        });
-        await repo.upsertEvents(p.id, run.id, rows);
       }
       if (budgetHit) throw new BudgetExceededError("budget reached during extraction");
       return { moreWork: true };
@@ -260,6 +273,7 @@ export async function advanceRun(
   profileId: string,
   now: Date,
   kind: RunKind = "weekly",
+  opts: { finishNow?: boolean } = {},
 ): Promise<{ runId: string; stage: Stage; done: boolean; costUsd: number }> {
   const p = await deps.repo.getProfile(profileId);
   if (!p) throw new Error(`Profile ${profileId} not found`);
@@ -268,8 +282,14 @@ export async function advanceRun(
   const run = await deps.repo.lockRun(created.id, new Date(now.getTime() + LOCK_MS), now);
   if (!run) return { runId: created.id, stage: created.stage, done: false, costUsd: created.usage.costUsd };
 
+  const token = run.lockToken!;
   const started = Date.now();
   let stage = run.stage;
+  // End of the window: stop finding and scoring, send what's ready.
+  if (opts.finishNow && STAGES.indexOf(stage) < STAGES.indexOf("email")) {
+    run.error = [run.error, "run window ending; sent what was ready"].filter(Boolean).join("; ");
+    stage = run.kind === "weekly" ? "email" : "done";
+  }
   try {
     do {
       let res: StepResult;
@@ -287,9 +307,11 @@ export async function advanceRun(
       }
       if (stage === "email" && res.moreWork) break; // email failed; retry on the next call
       if (!res.moreWork) stage = STAGES[STAGES.indexOf(stage) + 1];
+      // Save after every step so a function killed mid-call loses at most one step (and its spend is counted).
+      await deps.repo.checkpointRun(run.id, { stage, cursor: run.cursor, usage: run.usage, error: run.error }, token);
     } while (stage !== "done" && Date.now() - started < deps.timeBudgetMs);
   } finally {
-    await deps.repo.saveRun(run.id, { stage, cursor: run.cursor, usage: run.usage, error: run.error });
+    await deps.repo.saveRun(run.id, { stage, cursor: run.cursor, usage: run.usage, error: run.error }, token);
   }
   return { runId: run.id, stage, done: stage === "done", costUsd: run.usage.costUsd };
 }

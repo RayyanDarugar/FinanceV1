@@ -112,3 +112,11 @@ test("estimateCostUsd prices tokens at the configured model's rates", () => {
   expect(estimateCostUsd(u, "claude-opus-5-5")).toBeCloseTo(4 + 2, 5);
   expect(estimateCostUsd(u, "claude-sonnet-5-5")).toBeCloseTo(2 + 1, 5);
 });
+
+test("C1: a timed-out call is not retried (a retry could outlive the function)", async () => {
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const parse = vi.fn().mockRejectedValue(new Anthropic.APIConnectionTimeoutError({ message: "timeout" }));
+  const schema = z.object({ answer: z.string() });
+  expect(await callJson({ system: "s", user: "u", schema }, newUsage(), { parse })).toBeNull();
+  expect(parse).toHaveBeenCalledTimes(1);
+});

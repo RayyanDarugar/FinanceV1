@@ -59,3 +59,14 @@ test("findMatch reuses a stored event's key across weeks despite a reworded titl
   expect(findMatch(cand({ title: "Money After 50 Panel - Women in Business" }), stored, TZ)).toBe("k-old");
   expect(findMatch(cand({ title: "Something Else Entirely" }), stored, TZ)).toBeNull();
 });
+
+test("I2: different events at the same venue at different times stay separate", () => {
+  const out = mergeCandidates(
+    [
+      cand({ title: "Toddler Storytime", venueName: "Encinitas Library", startsAt: "2026-12-10T10:00:00-08:00" }),
+      cand({ title: "Medicare Basics", venueName: "Encinitas Library", startsAt: "2026-12-10T14:00:00-08:00" }),
+    ],
+    TZ,
+  );
+  expect(out).toHaveLength(2);
+});

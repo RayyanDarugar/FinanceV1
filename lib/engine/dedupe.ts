@@ -37,8 +37,10 @@ function sameEvent(
 ): boolean {
   if (!a.startsAt || !b.startsAt || day(a.startsAt, tz) !== day(b.startsAt, tz)) return false;
   if (jaccard(tokens(a.title), tokens(b.title)) >= 0.6) return true;
+  // Same venue only counts when the start times are close: libraries list many events per room per day.
   const va = venue(a.venueName);
-  return va !== null && va === venue(b.venueName);
+  const close = Math.abs(Date.parse(a.startsAt) - Date.parse(b.startsAt)) <= 30 * 60_000;
+  return va !== null && va === venue(b.venueName) && close;
 }
 
 /** Merges duplicates within a batch. The highest-confidence source wins; empty fields are filled from the others. */

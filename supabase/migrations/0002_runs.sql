@@ -8,6 +8,7 @@ create table if not exists runs (
   stage        text not null,
   cursor       jsonb not null default '{"sources":0,"queries":0}'::jsonb,
   locked_until timestamptz,
+  lock_token   text,
   emailed_at   timestamptz,
   usage        jsonb not null default '{}'::jsonb,
   error        text,

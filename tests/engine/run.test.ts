@@ -205,3 +205,55 @@ test("pre-screen: low-fit events never reach full scoring, ineligible ones skip 
   expect(kids.subScores).toBeNull();
   expect(kids.raw.prescreen).toBe(2);
 });
+
+describe("review fixes", () => {
+  test("C1: progress is checkpointed after every step, not only at the end", async () => {
+    const { profile, deps, repo } = await setup();
+    deps.timeBudgetMs = 60_000;
+    const spy = vi.spyOn(repo, "checkpointRun");
+    await advanceRun(deps, profile.id, NOW);
+    expect(spy.mock.calls.length).toBeGreaterThan(3);
+  });
+
+  test("C1: finishNow jumps an unfinished run straight to the email", async () => {
+    const { profile, deps, sent } = await setup();
+    await advanceRun(deps, profile.id, NOW); // collect, one batch
+    const r = await advanceRun(deps, profile.id, NOW, "weekly", { finishNow: true });
+    expect(r.done).toBe(true);
+    expect(sent).toEqual(["email"]);
+  });
+
+  test("I4: a stale call can't overwrite progress after its lock was taken over", async () => {
+    const { profile, repo } = await setup();
+    const run = await repo.getOrCreateRun(profile.id, "weekly", "2026-W47", () => "run-x", "collect");
+    const a = (await repo.lockRun(run.id, new Date(NOW.getTime() + 1000), NOW))!;
+    const later = new Date(NOW.getTime() + 2000);
+    const b = (await repo.lockRun(run.id, new Date(later.getTime() + 1000), later))!;
+    expect(b.lockToken).not.toBe(a.lockToken);
+    await repo.saveRun(run.id, { stage: "score" }, b.lockToken!);
+    await repo.saveRun(run.id, { stage: "extract" }, a.lockToken!); // stale
+    expect((await repo.getRun(profile.id, "weekly", "2026-W47"))?.stage).toBe("score");
+  });
+
+  test("I1: two candidates matching the same stored event become one row (no duplicate keys in a batch)", async () => {
+    const { profile, deps, repo } = await setup();
+    await runToDone(deps, profile.id);
+    deps.extract = vi.fn(async (page: { url: string }) =>
+      page.url.includes("chamber.org")
+        ? [raw("Money After 50 Panel", { venueName: "Annex" }), raw("Holiday Benefit", { venueName: "Hall" })] // each matches the stored event, not each other
+        : [],
+    );
+    const nextWeek = new Date(NOW.getTime() + 7 * 86_400_000);
+    let done = false;
+    for (let i = 0; i < 200 && !done; i++) done = (await advanceRun(deps, profile.id, nextWeek)).done;
+    expect(done).toBe(true);
+    expect(await repo.listEvents(profile.id)).toHaveLength(1);
+  });
+});
+
+test("windowEnding is the last half hour of the Monday window", async () => {
+  const { windowEnding } = await import("@/lib/engine/run");
+  expect(windowEnding(new Date("2026-11-16T14:29:00Z"), TZ)).toBe(false); // Mon 6:29 PST
+  expect(windowEnding(new Date("2026-11-16T14:30:00Z"), TZ)).toBe(true); // Mon 6:30
+  expect(windowEnding(new Date("2026-11-17T14:30:00Z"), TZ)).toBe(false); // Tue
+});

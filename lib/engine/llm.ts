@@ -14,7 +14,8 @@ export interface LlmClient {
 
 let sdk: Anthropic | null = null;
 function defaultClient(): LlmClient {
-  sdk ??= new Anthropic({ maxRetries: 2 });
+  // 90s per call and no hidden SDK retries: the run route has a 300s limit and must save before it.
+  sdk ??= new Anthropic({ maxRetries: 0, timeout: 90_000 });
   const client = sdk;
   return {
     parse: (params) => client.messages.parse(params as never) as never,
@@ -66,6 +67,10 @@ export async function callJson<T>(opts: CallJsonOpts<T>, usage: Usage, client: L
       if (checked.success) return checked.data;
     } catch (e) {
       if (e instanceof BudgetExceededError) throw e;
+      if (e instanceof Anthropic.APIConnectionTimeoutError) {
+        console.warn("callJson timed out; not retrying");
+        return null;
+      }
       console.warn("callJson attempt failed:", e instanceof Error ? e.message : e);
     }
   }

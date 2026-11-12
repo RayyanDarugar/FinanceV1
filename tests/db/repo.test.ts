@@ -74,3 +74,28 @@ if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return createSupabaseRepo();
   });
 }
+
+describe("review fix I3", () => {
+  test("a re-found event with the same content keeps its scores and location; a changed one is re-scored", async () => {
+    const repo = createMemoryRepo();
+    const p = makeProfile();
+    await repo.putProfile(p, "h");
+    const base = makeEvent({ title: "Gala", subScores: null, lat: null });
+    await repo.upsertEvents(p.id, "r1", [{ ...base, dedupeKey: "k", raw: {} }]);
+    const [e] = await repo.listEvents(p.id);
+    await repo.updateEvent(e.id, { subScores: { audienceFit: 8, wealth: 9 }, whyGo: "because", lat: 33, lng: -117, distanceMiles: 4 });
+    await repo.upsertEvents(p.id, "r2", [{ ...base, dedupeKey: "k", raw: {} }]);
+    expect((await repo.listEvents(p.id))[0]).toMatchObject({ subScores: { audienceFit: 8, wealth: 9 }, whyGo: "because", lat: 33, distanceMiles: 4 });
+    await repo.upsertEvents(p.id, "r3", [{ ...base, startsAt: "2026-12-11T18:30:00-08:00", dedupeKey: "k", raw: {} }]);
+    expect((await repo.listEvents(p.id))[0].subScores).toBeNull();
+  });
+
+  test("the memory repo rejects duplicate keys in one batch, like Postgres does", async () => {
+    const repo = createMemoryRepo();
+    const p = makeProfile();
+    await repo.putProfile(p, "h");
+    await expect(
+      repo.upsertEvents(p.id, "r", [{ ...makeEvent(), dedupeKey: "k", raw: {} }, { ...makeEvent(), dedupeKey: "k", raw: {} }]),
+    ).rejects.toThrow(/duplicate/i);
+  });
+});

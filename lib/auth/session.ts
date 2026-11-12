@@ -4,6 +4,9 @@ export const SESSION_COOKIE = "ef_session";
 
 export const isLive = () => process.env.NEXT_PUBLIC_DATA_MODE === "live";
 
+/** The live data API only runs in a live build; the prototype's unsigned cookie must never reach real data. */
+export const dataApiEnabled = (mode: string | undefined = process.env.NEXT_PUBLIC_DATA_MODE) => mode === "live";
+
 export const sessionCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",

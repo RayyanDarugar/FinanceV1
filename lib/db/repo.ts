@@ -8,6 +8,32 @@ export type StoredEvent = EventItem & { dedupeKey: string; raw: Record<string, u
 
 /** Fields a re-found event never overwrites (they're hers). */
 export const USER_EVENT_FIELDS = ["mark", "hideReason", "outcome", "outcomeNote"] as const;
+/** Fields worked out by geocoding/scoring. Kept on a re-find unless the event's content changed. */
+export const DERIVED_EVENT_FIELDS = [
+  "lat", "lng", "distanceMiles", "subScores", "score", "speaking", "suggestedMode", "nextStep", "whyGo", "whyFits", "needsPreapproval",
+] as const;
+
+const contentOf = (e: Pick<StoredEvent, "title" | "startsAt" | "description" | "venueName" | "address">) =>
+  JSON.stringify([e.title, e.startsAt, e.description, e.venueName, e.address]);
+
+/** What a re-found event keeps from the stored row: always her fields; derived fields only if content is unchanged. */
+export function keptOnRefind(prev: StoredEvent, incoming: StoredEvent): Partial<StoredEvent> {
+  const keep: Record<string, unknown> = Object.fromEntries(USER_EVENT_FIELDS.map((k) => [k, prev[k]]));
+  if (contentOf(prev) === contentOf(incoming)) {
+    for (const k of DERIVED_EVENT_FIELDS) keep[k] = prev[k];
+    for (const k of ["prescreen"]) if (k in prev.raw) incoming.raw = { ...incoming.raw, [k]: prev.raw[k] };
+  }
+  return keep as Partial<StoredEvent>;
+}
+
+export function assertUniqueKeys(list: { dedupeKey: string }[]) {
+  const seen = new Set<string>();
+  for (const e of list) {
+    if (seen.has(e.dedupeKey)) throw new Error(`duplicate dedupe key in one batch: ${e.dedupeKey}`);
+    seen.add(e.dedupeKey);
+  }
+}
+
 /** Fields a re-suggested org never overwrites. */
 export const USER_ORG_FIELDS = ["status", "followedAt", "lastContactedAt"] as const;
 
