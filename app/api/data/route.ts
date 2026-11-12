@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dispatch } from "@/lib/data/rpc";
-import { serverData } from "@/lib/data/server";
+import { profileId, serverData, serverRepo } from "@/lib/data/server";
+import { liveSettingsDeps } from "@/lib/settings/live";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -9,6 +10,6 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as { method?: unknown; args?: unknown } | null;
   if (!body) return NextResponse.json({ error: "Bad request" }, { status: 400 });
-  const out = await dispatch(serverData(), body.method, body.args);
+  const out = await dispatch(serverData(liveSettingsDeps(serverRepo(), profileId())), body.method, body.args);
   return NextResponse.json(out.body, { status: out.status });
 }
