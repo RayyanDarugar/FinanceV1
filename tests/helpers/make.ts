@@ -9,6 +9,7 @@ export function makeProfile(o: Partial<Profile> = {}): Profile {
     home: { label: "Carlsbad", lat: 33.1581, lng: -117.3506 },
     radiusMiles: 30,
     areaTowns: ["Carlsbad", "Encinitas", "Del Mar", "Solana Beach", "Rancho Santa Fe", "Oceanside", "San Marcos"],
+    searchHints: { region: "North County San Diego", metro: "San Diego", audiences: ["women in business", "physicians", "retirees"], topics: ["financial literacy", "retirement planning"] },
     idealClient: "Women 50-75",
     priorities: "speaking first",
     weights: { audienceFit: 0.45, wealth: 0.25, distance: 0.15, cost: 0.15 },

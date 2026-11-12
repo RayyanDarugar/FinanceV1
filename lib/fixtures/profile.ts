@@ -11,6 +11,15 @@ export function makeProfileFixture(): Profile {
       "Carlsbad", "Encinitas", "Del Mar", "Solana Beach", "Rancho Santa Fe", "Oceanside", "Vista",
       "San Marcos", "Escondido", "Cardiff", "Leucadia", "Poway", "Rancho Bernardo", "Carmel Valley", "La Jolla",
     ],
+    searchHints: {
+      region: "North County San Diego",
+      metro: "San Diego",
+      audiences: [
+        "women in business", "women professionals", "physicians", "medical society", "dental society",
+        "CPA society", "bar association", "small business owners", "retirees", "widows",
+      ],
+      topics: ["financial literacy", "retirement planning", "personal finance for women"],
+    },
     idealClient:
       "Women 50–75: professionals and doctors, pre-retirees and recent retirees, widows, and small business owners, with roughly $250k+ investable.",
     priorities:

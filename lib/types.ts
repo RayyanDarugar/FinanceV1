@@ -77,6 +77,8 @@ export interface Profile {
   home: { label: string; lat: number; lng: number };
   radiusMiles: number;
   areaTowns: string[];
+  /** Words the weekly search uses. Change these (not code) for another client or market. */
+  searchHints: { region: string; metro: string; audiences: string[]; topics: string[] };
   idealClient: string;
   priorities: string;
   weights: { audienceFit: number; wealth: number; distance: number; cost: number }; // sum = 1
