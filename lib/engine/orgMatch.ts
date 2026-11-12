@@ -10,7 +10,8 @@ export function matchOrgId(host: string, orgs: Organization[]): string | null {
   if (!h) return null;
   const hits = orgs.filter((o) => {
     const c = core(o.name);
-    return c.length >= 4 && (h === c || h.includes(c) || c.includes(h));
+    // The host may name the org with extra words ("… Club"); a shorter host must still be 2+ words ("Rotary" alone is too vague).
+    return c.length >= 4 && (h === c || h.includes(c) || (h.split(" ").length >= 2 && c.includes(h)));
   });
   hits.sort((a, b) => Number(b.status === "following") - Number(a.status === "following") || core(b.name).length - core(a.name).length);
   return hits[0]?.id ?? null;
