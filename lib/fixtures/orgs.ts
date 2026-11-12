@@ -1,0 +1,88 @@
+import type { Organization } from "@/lib/types";
+import { daysAgoIso } from "./time";
+
+/** Invented sample organizations for the prototype. */
+export function makeOrgFixtures(now: Date): Organization[] {
+  return [
+    {
+      id: "org-mcc",
+      name: "North County Muslim Community Center: Women's Committee",
+      website: "https://example.org/nc-mcc-women",
+      townText: "San Marcos",
+      lat: 33.1434, lng: -117.1661,
+      contact: { role: "Program chair", email: "women@example.org" },
+      whyHer:
+        "Many members are professional women and physicians in their 50s and 60s. The committee runs a monthly education night and has hosted finance speakers before.",
+      status: "following",
+      followedAt: daysAgoIso(now, 5),
+      lastContactedAt: null,
+      suggestedAt: daysAgoIso(now, 12),
+    },
+    {
+      id: "org-csusm",
+      name: "CSU San Marcos Career Center",
+      website: "https://example.org/csusm-career",
+      townText: "San Marcos",
+      lat: 33.1298, lng: -117.1597,
+      contact: { role: "Events coordinator", email: "careers@example.org" },
+      whyHer:
+        "Runs personal-finance workshops each semester and takes guest speakers. Alumni and staff events draw mid-career professionals. Spring speakers get booked in January.",
+      status: "following",
+      followedAt: daysAgoIso(now, 20),
+      lastContactedAt: null,
+      suggestedAt: daysAgoIso(now, 26),
+    },
+    {
+      id: "org-delmar-rotary",
+      name: "Del Mar Rotary",
+      website: "https://example.org/delmar-rotary",
+      townText: "Del Mar",
+      lat: 32.9595, lng: -117.2653,
+      contact: { role: "Program chair", phone: "(858) 555-0142" },
+      whyHer: "Weekly breakfast with retired business owners and professionals. Takes a guest speaker most weeks.",
+      status: "following",
+      followedAt: daysAgoIso(now, 45),
+      lastContactedAt: daysAgoIso(now, 10),
+      suggestedAt: daysAgoIso(now, 50),
+    },
+    {
+      id: "org-cwbn",
+      name: "Carlsbad Women's Business Network",
+      website: "https://example.org/cwbn",
+      townText: "Carlsbad",
+      lat: 33.1581, lng: -117.3506,
+      contact: { role: "President" },
+      whyHer: "Around 120 women business owners, many 45–65. Monthly lunch with a featured speaker.",
+      status: "suggested",
+      followedAt: null,
+      lastContactedAt: null,
+      suggestedAt: daysAgoIso(now, 2),
+    },
+    {
+      id: "org-rsf-garden",
+      name: "Rancho Santa Fe Garden Club",
+      website: "https://example.org/rsf-garden",
+      townText: "Rancho Santa Fe",
+      lat: 33.0203, lng: -117.2028,
+      contact: { role: "Programs committee" },
+      whyHer: "Members are mostly retired women in one of the county's wealthiest areas. Hosts monthly talks, not only on gardening.",
+      status: "suggested",
+      followedAt: null,
+      lastContactedAt: null,
+      suggestedAt: daysAgoIso(now, 2),
+    },
+    {
+      id: "org-encinitas-friends",
+      name: "Friends of the Encinitas Library",
+      website: "https://example.org/encinitas-friends",
+      townText: "Encinitas",
+      lat: 33.0459, lng: -117.2925,
+      contact: { role: "Program volunteer" },
+      whyHer: "Runs free adult-education talks. Audiences skew retired and local. Low effort to get on the calendar.",
+      status: "suggested",
+      followedAt: null,
+      lastContactedAt: null,
+      suggestedAt: daysAgoIso(now, 2),
+    },
+  ];
+}
