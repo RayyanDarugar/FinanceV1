@@ -2,6 +2,7 @@ import { createMemoryRepo } from "@/lib/db/memoryRepo";
 import type { RawEvent } from "@/lib/engine/extract";
 import { advanceRun, weekKey, type RunDeps } from "@/lib/engine/run";
 import { MAX_SEARCHES_PER_RUN } from "@/lib/engine/search";
+import { pendingRefreshKey, refreshKey } from "@/lib/engine/refresh";
 import { newUsage } from "@/lib/engine/usage";
 import { makeProfile, NOW } from "../helpers/make";
 
@@ -10,7 +11,7 @@ const TZ = "America/Los_Angeles";
 function raw(title: string, o: Partial<RawEvent> = {}): RawEvent {
   return {
     title, host: "Carlsbad Chamber", startsAt: "2026-12-10T18:30:00-08:00", endsAt: null, yearStated: true,
-    venueName: "Hall", address: "1 Main St, Carlsbad", townText: "Carlsbad", costUsd: 0, registerUrl: null,
+    venueName: "Hall", address: "1 Main St, Carlsbad", townText: "Carlsbad", costUsd: 0, registerUrl: null, eventUrl: null,
     contactRole: null, contactName: null, contactEmail: null, contactPhone: null, description: "d",
     speakingAsked: false, modes: ["attend"], ...o,
   };
@@ -256,4 +257,29 @@ test("windowEnding is the last half hour of the Monday window", async () => {
   expect(windowEnding(new Date("2026-11-16T14:29:00Z"), TZ)).toBe(false); // Mon 6:29 PST
   expect(windowEnding(new Date("2026-11-16T14:30:00Z"), TZ)).toBe(true); // Mon 6:30
   expect(windowEnding(new Date("2026-11-17T14:30:00Z"), TZ)).toBe(false); // Tue
+});
+
+test("an event's own link replaces the calendar page as its link", async () => {
+  const { repo, profile, deps } = await setup({
+    extract: vi.fn(async (page: { url: string }) =>
+      page.url.includes("chamber.org") ? [raw("Money After 50 Panel", { eventUrl: "https://chamber.org/events/money-after-50" })] : []),
+  });
+  await runToDone(deps, profile.id);
+  const [e] = await repo.listEvents(profile.id);
+  expect(e.sourceUrl).toBe("https://chamber.org/events/money-after-50");
+});
+
+test("a refresh run finds and scores events but sends no email and suggests no organizations", async () => {
+  const { repo, profile, deps, sent } = await setup();
+  const key = refreshKey(NOW, TZ);
+  expect(await pendingRefreshKey(repo, profile.id, NOW, TZ)).toBeNull();
+  await repo.getOrCreateRun(profile.id, "weekly", key, () => "r1", "collect");
+  expect(await pendingRefreshKey(repo, profile.id, NOW, TZ)).toBe(key);
+  let done = false;
+  for (let i = 0; i < 200 && !done; i++) done = (await advanceRun(deps, profile.id, NOW, "weekly", { key })).done;
+  expect(done).toBe(true);
+  expect(await repo.listEvents(profile.id)).toHaveLength(1);
+  expect(sent).toEqual([]);
+  expect(deps.orgs).not.toHaveBeenCalled();
+  expect(await pendingRefreshKey(repo, profile.id, NOW, TZ)).toBeNull();
 });

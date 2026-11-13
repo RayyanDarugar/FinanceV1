@@ -15,6 +15,7 @@ export const RawEventSchema = z.object({
   townText: z.string().nullable(),
   costUsd: z.number().nullable(),
   registerUrl: z.string().nullable(),
+  eventUrl: z.string().nullable(),
   contactRole: z.string().nullable(),
   contactName: z.string().nullable(),
   contactEmail: z.string().nullable(),
@@ -36,6 +37,7 @@ Rules:
 - costUsd: lowest individual ticket price in US dollars; 0 if free; null if not stated. Ignore sponsorship packages when an individual ticket exists.
 - speakingAsked: true ONLY if the page explicitly invites speakers, presenters, panelists or workshop leaders for this event. Never infer it.
 - modes: the ways a guest could take part that the page actually mentions (attend, speak, table/booth, sponsor). Always include "attend" if the public can come.
+- Links on the page are written as "label (link: URL)". eventUrl: the link to this specific event's own page (its title link, or a "details"/"more info" link next to it). registerUrl: its registration or ticket link. Copy URLs exactly as written; use null if the event has no link of its own. Never use the page's own URL or a general home/calendar link.
 - host: the organization running the event. townText: the city it's in.
 - description: one or two plain sentences about the event and who attends, from the page only.
 - Copy facts from the page. Do not invent addresses, prices, contacts or audiences. Use null when unknown.
@@ -63,5 +65,7 @@ Page URL: ${page.url}
 ${page.text}
 </page>`;
   const out = await callJson({ system: SYSTEM, user, schema: ExtractSchema, maxTokens: 8000, effort: "low", model: extractModel() }, usage);
-  return out?.events ?? [];
+  // A link the page doesn't contain was made up; drop it.
+  const onPage = (u: string | null) => (u && page.text.includes(u) ? u : null);
+  return (out?.events ?? []).map((e) => ({ ...e, eventUrl: onPage(e.eventUrl), registerUrl: onPage(e.registerUrl) }));
 }

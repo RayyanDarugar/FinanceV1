@@ -6,7 +6,7 @@ const TZ = "America/Los_Angeles";
 function cand(o: Partial<Candidate> = {}): Candidate {
   const base: RawEvent = {
     title: "Event", host: "Host", startsAt: "2026-12-10T18:30:00-08:00", endsAt: null, yearStated: true,
-    venueName: null, address: null, townText: "Carlsbad", costUsd: null, registerUrl: null, contactRole: null,
+    venueName: null, address: null, townText: "Carlsbad", costUsd: null, registerUrl: null, eventUrl: null, contactRole: null,
     contactName: null, contactEmail: null, contactPhone: null, description: "", speakingAsked: false, modes: ["attend"],
   };
   return { ...base, sourceUrl: "https://a.org", sourceKind: "listing", confidence: 0.65, ...o };

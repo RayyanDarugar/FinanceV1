@@ -5,13 +5,14 @@ import type { LatLng } from "@/lib/domain/geo";
 import { callJson as realCallJson } from "@/lib/engine/llm";
 import { newUsage, type Usage } from "@/lib/engine/usage";
 import type { Organization, Profile } from "@/lib/types";
-import { simpleParse } from "./simpleParse";
+import { SEARCH_NOW_TEXT, simpleParse } from "./simpleParse";
 import type { ParsedChange, Proposer, SettingsPatch } from "./types";
 
 /** What she may change herself. Everything else (recipients, passcode, schedule) is Rayyan-only. */
 const FIELDS = [
   "radiusMiles", "costCeilingUsd", "idealClient", "priorities", "areaTowns", "addExclusion", "removeExclusion",
   "weights", "leadDays", "addTrustedSource", "home", "followOrg", "unfollowOrg",
+  "addSearchAudience", "removeSearchAudience", "addSearchTopic", "removeSearchTopic", "searchNow",
 ] as const;
 type Field = (typeof FIELDS)[number];
 
@@ -37,6 +38,11 @@ const VALIDATORS: Record<Field, z.ZodType> = {
   home: z.string().min(2).max(100),
   followOrg: z.string().min(2).max(150),
   unfollowOrg: z.string().min(2).max(150),
+  addSearchAudience: z.string().trim().min(2).max(60),
+  removeSearchAudience: z.string().trim().min(2).max(60),
+  addSearchTopic: z.string().trim().min(2).max(60),
+  removeSearchTopic: z.string().trim().min(2).max(60),
+  searchNow: z.literal(true),
 };
 
 const money = (n: number) => `$${n.toLocaleString("en-US")}`;
@@ -55,6 +61,10 @@ Allowed fields and the JSON "value" each takes (value is always a JSON-encoded s
 - addTrustedSource: {name, url} — an events calendar page to check weekly
 - home: string — the town/place their search is centered on
 - followOrg / unfollowOrg: string — an organization's name
+- addSearchAudience / removeSearchAudience: string — a kind of group to look for events for (e.g. "dentists", "widows") / stop looking for
+- addSearchTopic / removeSearchTopic: string — a topic to look for speaking and event opportunities on / stop looking for
+- searchNow: true — run a fresh search for new events right away (only when they ask to search or look again now/today)
+When they ask to find or look for more of some kind of event or group, use the search fields; change idealClient or priorities only if they say who they want to meet has changed.
 If what they asked for is already true in the current settings, return no changes, unsupported null, and one short friendly sentence in "alreadySet" saying so. Otherwise alreadySet is null.
 If the request asks for anything else (passcode, email recipients, schedule, deleting data, anything unclear), return no changes and put a few words in "unsupported". Never guess.`;
 
@@ -110,6 +120,30 @@ async function toChange(field: Field, value: unknown, p: Profile, orgs: Organiza
       if (!hit) return null;
       return one({ field, from: p.home.label, to: v, text: `Home base: ${p.home.label} → ${v}` }, { kind: "profile", patch: { home: { label: v, ...hit } } });
     }
+    case "addSearchAudience":
+    case "addSearchTopic": {
+      const list = field === "addSearchAudience" ? "audiences" : "topics";
+      const cur = p.searchHints[list];
+      const val = v as string;
+      if (cur.some((x) => x.toLowerCase() === val.toLowerCase())) return null;
+      return one(
+        { field: "searchHints", from: cur.join(", "), to: val, text: `Also search for: ${val}` },
+        { kind: "profile", patch: { searchHints: { ...p.searchHints, [list]: [...cur, val] } } },
+      );
+    }
+    case "removeSearchAudience":
+    case "removeSearchTopic": {
+      const list = field === "removeSearchAudience" ? "audiences" : "topics";
+      const cur = p.searchHints[list];
+      const hit = cur.find((x) => x.toLowerCase() === (v as string).toLowerCase());
+      if (!hit) return null;
+      return one(
+        { field: "searchHints", from: cur.join(", "), to: hit, text: `Stop searching for: ${hit}` },
+        { kind: "profile", patch: { searchHints: { ...p.searchHints, [list]: cur.filter((x) => x !== hit) } } },
+      );
+    }
+    case "searchNow":
+      return one({ field: "search_now", from: "", to: "now", text: SEARCH_NOW_TEXT }, { kind: "search_now" });
     case "followOrg":
     case "unfollowOrg": {
       const follow = field === "followOrg";
@@ -134,7 +168,7 @@ export function makeLlmProposer(deps: ProposerDeps): Proposer {
   return async (text, p, orgs) => {
     const quick = simpleParse(text, p, orgs);
     if (quick) return quick;
-    const current = { radiusMiles: p.radiusMiles, costCeilingUsd: p.costCeilingUsd, idealClient: p.idealClient, priorities: p.priorities, areaTowns: p.areaTowns, exclusions: p.exclusions, weights: p.weights, leadDays: p.complianceRule.leadDays, home: p.home.label };
+    const current = { radiusMiles: p.radiusMiles, costCeilingUsd: p.costCeilingUsd, idealClient: p.idealClient, priorities: p.priorities, areaTowns: p.areaTowns, searchFor: { groups: p.searchHints.audiences, topics: p.searchHints.topics }, exclusions: p.exclusions, weights: p.weights, leadDays: p.complianceRule.leadDays, home: p.home.label };
     const out = await callJson(
       { system: SYSTEM, user: `Current settings: ${JSON.stringify(current)}\nKnown organizations: ${orgs.map((o) => o.name).join("; ")}\n\nRequest: ${text}`, schema: LlmSchema, maxTokens: 2000, effort: "low" },
       deps.usage ?? newUsage(),
@@ -142,6 +176,7 @@ export function makeLlmProposer(deps: ProposerDeps): Proposer {
     if (!out || out.unsupported) return null;
     if (!out.changes.length) return out.alreadySet ? { message: out.alreadySet } : null;
     const merged: ParsedChange = { changes: [], apply: [] };
+    let cur = p; // each change builds on the ones before it (two additions to one list both stick)
     for (const c of out.changes) {
       let value: unknown;
       try {
@@ -149,8 +184,9 @@ export function makeLlmProposer(deps: ProposerDeps): Proposer {
       } catch {
         value = c.value;
       }
-      const one = await toChange(c.field, value, p, orgs, deps);
+      const one = await toChange(c.field, value, cur, orgs, deps);
       if (!one) return null; // all or nothing: never apply half of what she asked
+      for (const a of one.apply) if (a.kind === "profile") cur = { ...cur, ...a.patch };
       merged.changes.push(...one.changes);
       merged.apply.push(...one.apply);
     }

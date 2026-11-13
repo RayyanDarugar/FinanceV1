@@ -19,6 +19,7 @@ function raw(o: Partial<RawEvent> = {}): RawEvent {
     townText: "Carlsbad",
     costUsd: 150,
     registerUrl: null,
+    eventUrl: null,
     contactRole: null,
     contactName: null,
     contactEmail: null,
@@ -72,6 +73,16 @@ describe("extractEvents", () => {
   test("a null LLM result becomes []", async () => {
     const events = await extractEvents(page, "organizer", NOW, newUsage(), { callJson: (async () => null) as never });
     expect(events).toEqual([]);
+  });
+
+  test("event and register links are kept only if they appear on the page", async () => {
+    const linked = { url: "https://club.org/", text: "David Lott (link: https://club.org/Speakers/abc) Dec 9" };
+    const callJson = vi.fn(async () => ({
+      events: [raw({ title: "On page", eventUrl: "https://club.org/Speakers/abc", registerUrl: "https://made-up.org/register" })],
+    }));
+    const [e] = await extractEvents(linked, "trusted_calendar", NOW, newUsage(), { callJson: callJson as never });
+    expect(e.eventUrl).toBe("https://club.org/Speakers/abc");
+    expect(e.registerUrl).toBeNull();
   });
 
   test("the prompt carries today's date and the page URL and text", async () => {

@@ -59,17 +59,30 @@ describe("fetchPageText", () => {
     expect(usage.fetches).toBe(1);
   });
 
+  test("links are kept inline as absolute URLs so each event can point at its own page", async () => {
+    const page = `<html><body><main>
+      <p><a href="Speakers/abc">David Lott</a> on wells</p>
+      <p><a href="https://portal.clubrunner.ca/7697/Events/holiday">RSF Rotary Holiday Party</a></p>
+      <p><a href="#top">Back to top</a> <a href="mailto:x@y.org">Email us</a></p>
+    </main></body></html>`;
+    const out = await fetchPageText("https://www.rsfrotary.com/", newUsage(), { fetchImpl: (async () => html(page)) as unknown as typeof fetch });
+    expect(out?.text).toContain("David Lott (link: https://www.rsfrotary.com/Speakers/abc)");
+    expect(out?.text).toContain("RSF Rotary Holiday Party (link: https://portal.clubrunner.ca/7697/Events/holiday)");
+    expect(out?.text).not.toContain("#top");
+    expect(out?.text).not.toContain("mailto:");
+  });
+
   test("returns null on 404 and on non-HTML", async () => {
     const usage = newUsage();
     expect(await fetchPageText("https://a.org/x", usage, { fetchImpl: (async () => html("nope", 404)) as unknown as typeof fetch })).toBeNull();
     expect(await fetchPageText("https://a.org/x.pdf", usage, { fetchImpl: (async () => html("%PDF", 200, "application/pdf")) as unknown as typeof fetch })).toBeNull();
   });
 
-  test("truncates very long pages to 20k characters", async () => {
+  test("truncates very long pages to 30k characters", async () => {
     const usage = newUsage();
     const long = `<p>${"word ".repeat(10_000)}</p>`;
     const out = await fetchPageText("https://a.org/e", usage, { fetchImpl: (async () => html(long)) as unknown as typeof fetch });
-    expect(out!.text.length).toBeLessThanOrEqual(20_000);
+    expect(out!.text.length).toBeLessThanOrEqual(30_000);
   });
 });
 

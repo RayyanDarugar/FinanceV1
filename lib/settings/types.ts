@@ -4,7 +4,8 @@ import type { Organization, Profile } from "@/lib/types";
 export type SettingsPatch =
   | { kind: "profile"; patch: Partial<Profile> }
   | { kind: "org_status"; orgId: string; status: Organization["status"] }
-  | { kind: "org_create"; org: Organization };
+  | { kind: "org_create"; org: Organization }
+  | { kind: "search_now" };
 
 export interface ParsedChange {
   changes: SettingsChange[];

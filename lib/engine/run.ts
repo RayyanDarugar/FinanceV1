@@ -7,6 +7,7 @@ import { dedupeKey, findMatch, mergeCandidates, type Candidate } from "./dedupe"
 import type { RawEvent } from "./extract";
 import { summarizeFeedback } from "./feedback";
 import { BudgetExceededError } from "./llm";
+import { isRefreshKey } from "./refresh";
 import { matchOrgId } from "./orgMatch";
 import type { ScoreResult } from "./score";
 import { buildQueries, MAX_SEARCHES_PER_RUN, type SearchResult } from "./search";
@@ -145,7 +146,7 @@ async function step(stage: Stage, run: Run, p: Profile, deps: RunDeps, now: Date
           const raws = await deps.extract(fetched, pg.sourceKind, now, usage);
           return raws.flatMap((r): Candidate[] => {
             const v = verifyEvent(r, pg.sourceKind, now, p.timezone);
-            return v.ok ? [{ ...r, sourceUrl: fetched.url, sourceKind: pg.sourceKind, confidence: v.confidence }] : [];
+            return v.ok ? [{ ...r, sourceUrl: r.eventUrl ?? fetched.url, sourceKind: pg.sourceKind, confidence: v.confidence }] : [];
           });
         }),
       );
@@ -240,12 +241,13 @@ async function step(stage: Stage, run: Run, p: Profile, deps: RunDeps, now: Date
     }
 
     case "orgs": {
+      if (isRefreshKey(run.weekKey)) return { moreWork: false };
       await deps.orgs(p, run, now, usage);
       return { moreWork: false };
     }
 
     case "email": {
-      if (run.kind !== "weekly") return { moreWork: false };
+      if (run.kind !== "weekly" || isRefreshKey(run.weekKey)) return { moreWork: false };
       if (!(await repo.claimEmail(run.id, now))) return { moreWork: false };
       try {
         await deps.sendWeekly(p, now);
@@ -273,11 +275,11 @@ export async function advanceRun(
   profileId: string,
   now: Date,
   kind: RunKind = "weekly",
-  opts: { finishNow?: boolean } = {},
+  opts: { finishNow?: boolean; /** run key instead of this ISO week (refresh runs) */ key?: string } = {},
 ): Promise<{ runId: string; stage: Stage; done: boolean; costUsd: number }> {
   const p = await deps.repo.getProfile(profileId);
   if (!p) throw new Error(`Profile ${profileId} not found`);
-  const created = await deps.repo.getOrCreateRun(profileId, kind, weekKey(now, p.timezone), deps.newId, firstStage(kind));
+  const created = await deps.repo.getOrCreateRun(profileId, kind, opts.key ?? weekKey(now, p.timezone), deps.newId, firstStage(kind));
   if (created.stage === "done") return { runId: created.id, stage: "done", done: true, costUsd: created.usage.costUsd };
   const run = await deps.repo.lockRun(created.id, new Date(now.getTime() + LOCK_MS), now);
   if (!run) return { runId: created.id, stage: created.stage, done: false, costUsd: created.usage.costUsd };

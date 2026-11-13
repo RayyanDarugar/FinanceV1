@@ -114,6 +114,7 @@ export function createFakeData(storage: Storage, now: () => Date): AppData {
       for (const p of entry.apply) {
         if (p.kind === "profile") state.profile = { ...state.profile, ...p.patch };
         else if (p.kind === "org_create") state.orgs.push(p.org);
+        else if (p.kind === "search_now") continue; // prototype: nothing to search
         else {
           const o = findOrg(p.orgId);
           if (o) {

@@ -93,3 +93,49 @@ test("a refusal still returns null even if the model also says alreadySet", asyn
   const { propose } = proposer({ changes: [], unsupported: "passcode", alreadySet: "whatever" });
   expect(await propose("make the passcode 1234", p, orgs)).toBeNull();
 });
+
+test("adding a group to search for changes only the search list", async () => {
+  const { propose } = proposer({ changes: [{ field: "addSearchAudience", value: JSON.stringify("dentists") }], unsupported: null, alreadySet: null });
+  const out = await propose("look for more events for dentists", p, orgs);
+  expect(out).toMatchObject({
+    changes: [{ text: "Also search for: dentists" }],
+    apply: [{ kind: "profile", patch: { searchHints: { ...p.searchHints, audiences: [...p.searchHints.audiences, "dentists"] } } }],
+  });
+});
+
+test("removing a search topic", async () => {
+  const { propose } = proposer({ changes: [{ field: "removeSearchTopic", value: JSON.stringify("Retirement Planning") }], unsupported: null, alreadySet: null });
+  const out = await propose("stop looking for retirement planning things", p, orgs);
+  expect(out).toMatchObject({
+    changes: [{ text: "Stop searching for: retirement planning" }],
+    apply: [{ kind: "profile", patch: { searchHints: { ...p.searchHints, topics: ["financial literacy"] } } }],
+  });
+});
+
+test("search again now is free and proposes a new search", async () => {
+  const { propose, callJson } = proposer(null);
+  const out = await propose("search again now", p, orgs);
+  expect(out).toMatchObject({ apply: [{ kind: "search_now" }] });
+  expect(callJson).not.toHaveBeenCalled();
+});
+
+test("the model can ask for a new search along with a search change", async () => {
+  const { propose } = proposer({
+    changes: [{ field: "addSearchAudience", value: JSON.stringify("dentists") }, { field: "searchNow", value: "true" }],
+    unsupported: null,
+    alreadySet: null,
+  });
+  const out = await propose("find me dentist events today", p, orgs);
+  expect(out).toMatchObject({ apply: [{ kind: "profile" }, { kind: "search_now" }] });
+});
+
+test("two changes to the same list in one request both stick", async () => {
+  const { propose } = proposer({
+    changes: [{ field: "addSearchAudience", value: JSON.stringify("dentists") }, { field: "addSearchAudience", value: JSON.stringify("pharmacists") }],
+    unsupported: null,
+    alreadySet: null,
+  });
+  const out = await propose("look for dentist and pharmacist events", p, orgs);
+  const patches = (out as { apply: { patch?: { searchHints?: { audiences: string[] } } }[] }).apply;
+  expect(patches.at(-1)?.patch?.searchHints?.audiences).toEqual([...p.searchHints.audiences, "dentists", "pharmacists"]);
+});

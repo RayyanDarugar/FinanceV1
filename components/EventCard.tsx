@@ -24,7 +24,7 @@ export function EventCard({
 }) {
   const distance = event.distanceMiles !== null ? ` · ${Math.round(event.distanceMiles)} mi` : "";
   return (
-    <article className={`rounded-2xl bg-card p-4 shadow-sm ${selected ? "lg:ring-2 lg:ring-accent" : ""}`}>
+    <article className={`rounded-2xl bg-card p-4 shadow-sm ${selected ? "lg:ring-2 lg:ring-inset lg:ring-accent" : ""}`}>
       <p className="text-[13px] font-semibold uppercase tracking-wide text-gold">
         {formatEventWhen(event.startsAt, event.endsAt, profile.timezone)}
       </p>

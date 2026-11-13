@@ -1,10 +1,13 @@
 import { stripStored, type Repo } from "@/lib/db/repo";
 import { orgNudges } from "@/lib/domain/nudges";
 import { rankEvents } from "@/lib/domain/rank";
+import { refreshKey } from "@/lib/engine/refresh";
 import { simpleParse } from "@/lib/settings/simpleParse";
 import type { Proposer, SettingsPatch } from "@/lib/settings/types";
 import type { Profile } from "@/lib/types";
 import { UNSUPPORTED_CHANGE, type AppData, type SettingsProposal } from "./AppData";
+
+const ALREADY_SEARCHED = "I already looked for new events today. You can ask again tomorrow, and the regular search still runs Monday.";
 
 export interface ServiceDeps {
   repo: Repo;
@@ -31,7 +34,8 @@ export function createServiceData(deps: ServiceDeps): AppData {
     for (const p of patches) {
       if (p.kind === "profile") await repo.updateProfile(profileId, p.patch);
       else if (p.kind === "org_status") await repo.setOrgStatus(p.orgId, p.status, now());
-      else await repo.upsertOrgs(profileId, [p.org]);
+      else if (p.kind === "org_create") await repo.upsertOrgs(profileId, [p.org]);
+      else await repo.getOrCreateRun(profileId, "weekly", refreshKey(now(), (await profile()).timezone), () => crypto.randomUUID(), "collect");
     }
   }
 
@@ -86,7 +90,18 @@ export function createServiceData(deps: ServiceDeps): AppData {
       const [p, orgs] = await Promise.all([profile(), repo.listOrgs(profileId)]);
       const id = crypto.randomUUID();
       const parsed = text.trim() ? await proposer(text, p, orgs) : null;
-      const change = parsed && "changes" in parsed ? parsed : null;
+      let change = parsed && "changes" in parsed ? parsed : null;
+      // One extra search a day: drop the search if today's already happened.
+      if (change?.apply.some((a) => a.kind === "search_now") && (await repo.getRun(profileId, "weekly", refreshKey(now(), p.timezone)))) {
+        const apply = change.apply.filter((a) => a.kind !== "search_now");
+        const changes = change.changes.filter((c) => c.field !== "search_now");
+        change = changes.length ? { changes, apply } : null;
+        if (!change) {
+          const proposal: SettingsProposal = { id, changes: [], unsupported: ALREADY_SEARCHED };
+          await repo.saveProposal(profileId, proposal, []);
+          return proposal;
+        }
+      }
       const proposal: SettingsProposal = change
         ? { id, changes: change.changes, unsupported: null }
         : { id, changes: [], unsupported: parsed && "message" in parsed ? parsed.message : UNSUPPORTED_CHANGE };
