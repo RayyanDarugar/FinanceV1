@@ -18,6 +18,7 @@ type Field = (typeof FIELDS)[number];
 const LlmSchema = z.object({
   changes: z.array(z.object({ field: z.enum(FIELDS), value: z.string() })),
   unsupported: z.string().nullable(),
+  alreadySet: z.string().nullable(),
 });
 
 const VALIDATORS: Record<Field, z.ZodType> = {
@@ -54,6 +55,7 @@ Allowed fields and the JSON "value" each takes (value is always a JSON-encoded s
 - addTrustedSource: {name, url} — an events calendar page to check weekly
 - home: string — the town/place their search is centered on
 - followOrg / unfollowOrg: string — an organization's name
+If what they asked for is already true in the current settings, return no changes, unsupported null, and one short friendly sentence in "alreadySet" saying so. Otherwise alreadySet is null.
 If the request asks for anything else (passcode, email recipients, schedule, deleting data, anything unclear), return no changes and put a few words in "unsupported". Never guess.`;
 
 export interface ProposerDeps {
@@ -137,7 +139,8 @@ export function makeLlmProposer(deps: ProposerDeps): Proposer {
       { system: SYSTEM, user: `Current settings: ${JSON.stringify(current)}\nKnown organizations: ${orgs.map((o) => o.name).join("; ")}\n\nRequest: ${text}`, schema: LlmSchema, maxTokens: 2000, effort: "low" },
       deps.usage ?? newUsage(),
     );
-    if (!out || out.unsupported || !out.changes.length) return null;
+    if (!out || out.unsupported) return null;
+    if (!out.changes.length) return out.alreadySet ? { message: out.alreadySet } : null;
     const merged: ParsedChange = { changes: [], apply: [] };
     for (const c of out.changes) {
       let value: unknown;

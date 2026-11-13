@@ -83,3 +83,13 @@ test("rescoreUpcoming re-scores stored upcoming events and stops at the time bud
   expect(await repo.getEvent("u1")).toMatchObject({ whyGo: "new why", subScores: { audienceFit: 2, wealth: 2 } });
   expect((await repo.getEvent("past"))?.whyGo).not.toBe("new why");
 });
+
+test("a request that's already true comes back as a message, not a refusal", async () => {
+  const { propose } = proposer({ changes: [], unsupported: null, alreadySet: "Escondido and Vista are already in your towns." });
+  expect(await propose("add Escondido and Vista to my towns", p, orgs)).toEqual({ message: "Escondido and Vista are already in your towns." });
+});
+
+test("a refusal still returns null even if the model also says alreadySet", async () => {
+  const { propose } = proposer({ changes: [], unsupported: "passcode", alreadySet: "whatever" });
+  expect(await propose("make the passcode 1234", p, orgs)).toBeNull();
+});

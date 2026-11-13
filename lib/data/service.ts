@@ -86,10 +86,11 @@ export function createServiceData(deps: ServiceDeps): AppData {
       const [p, orgs] = await Promise.all([profile(), repo.listOrgs(profileId)]);
       const id = crypto.randomUUID();
       const parsed = text.trim() ? await proposer(text, p, orgs) : null;
-      const proposal: SettingsProposal = parsed
-        ? { id, changes: parsed.changes, unsupported: null }
-        : { id, changes: [], unsupported: UNSUPPORTED_CHANGE };
-      await repo.saveProposal(profileId, proposal, parsed?.apply ?? []);
+      const change = parsed && "changes" in parsed ? parsed : null;
+      const proposal: SettingsProposal = change
+        ? { id, changes: change.changes, unsupported: null }
+        : { id, changes: [], unsupported: parsed && "message" in parsed ? parsed.message : UNSUPPORTED_CHANGE };
+      await repo.saveProposal(profileId, proposal, change?.apply ?? []);
       return proposal;
     },
     async confirmSettingsChange(proposalId) {

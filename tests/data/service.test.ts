@@ -17,3 +17,10 @@ runAppDataContract("live service over memory repo", async () => {
   const { repo, profileId } = await seeded();
   return createServiceData({ repo, profileId, now: () => NOW });
 });
+
+test("a proposer message is shown instead of the generic refusal", async () => {
+  const { repo, profileId } = await seeded();
+  const svc = createServiceData({ repo, profileId, now: () => NOW, proposer: async () => ({ message: "Escondido is already in your towns." }) });
+  const proposal = await svc.proposeSettingsChange("add Escondido to my towns");
+  expect(proposal).toMatchObject({ changes: [], unsupported: "Escondido is already in your towns." });
+});

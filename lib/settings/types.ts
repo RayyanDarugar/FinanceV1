@@ -11,5 +11,10 @@ export interface ParsedChange {
   apply: SettingsPatch[];
 }
 
-/** Turns her words into a proposed change, or null when it can't. */
-export type Proposer = (text: string, profile: Profile, orgs: Organization[]) => Promise<ParsedChange | null>;
+/** A request that needs no change (e.g. it is already set), with a short explanation for her. */
+export interface ProposerMessage {
+  message: string;
+}
+
+/** Turns her words into a proposed change, a message when nothing needs changing, or null when it can't. */
+export type Proposer = (text: string, profile: Profile, orgs: Organization[]) => Promise<ParsedChange | ProposerMessage | null>;
